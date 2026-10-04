@@ -41,16 +41,13 @@ def test_ruling_with_foundry_html(client):
     r = client.post("/api/v1/rulings", json={"query": "Trip", "render": "foundry"}, headers=auth())
     assert r.status_code == 200
     body = r.json()
-    assert body["ruling"]["raw"][0]["quote"] == "lands prone."
-    assert "&lt;b&gt;prone&lt;/b&gt;" in body["html"]  # LLM output is escaped
-    assert body["embed"] is None
-
-
-def test_ruling_with_discord_embed(client):
-    r = client.post("/api/v1/rulings", json={"query": "Trip", "render": "discord"}, headers=auth())
-    embed = r.json()["embed"]
-    assert embed["fields"][0]["name"] == "Trip (action)"
-    assert "aonprd.com" in embed["fields"][0]["value"]
+    ref = body["ruling"]["raw"][0]
+    assert ref["quote"] == "lands prone."
+    assert ref["text"].startswith("Fixture: Attempt an Athletics check")
+    html = body["html"]
+    assert "&lt;b&gt;prone&lt;/b&gt;" in html  # LLM output is escaped
+    # Full rules as written come before the ruling.
+    assert html.index("Fixture: Attempt an Athletics check") < html.index("Tulkinta")
 
 
 def test_healthz_is_public(client):
@@ -60,3 +57,8 @@ def test_healthz_is_public(client):
 def test_app_refuses_to_start_without_tokens(rules_db):
     with pytest.raises(RuntimeError):
         create_app(Settings(rules_db_path=rules_db, client_tokens=[]), llm=FakeProvider(respond))
+
+
+def test_ruling_without_render_returns_data_only(client):
+    r = client.post("/api/v1/rulings", json={"query": "Trip"}, headers=auth())
+    assert r.json()["html"] is None

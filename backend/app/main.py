@@ -42,6 +42,7 @@ def create_app(settings: Settings | None = None, llm: LLMProvider | None = None)
 
     app = FastAPI(title="VTT Automaton", version="0.1.0", lifespan=lifespan)
     app.dependency_overrides[get_settings] = lambda: settings
+    app.state.answer_language = settings.answer_language
     app.state.rules_service = RulesService(
         RulesStore(settings.rules_db_path),
         llm or build_llm(settings),

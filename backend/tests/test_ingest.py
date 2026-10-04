@@ -73,6 +73,13 @@ def test_to_row_skips(extra):
     assert to_row(doc("action-40", **extra)) is None
 
 
+def test_legacy_flag_requires_all_sources_to_be_legacy():
+    assert to_row(doc("action-8", source=["Core Rulebook"]))["legacy"] == 1
+    assert to_row(doc("x-1", source=["Core Rulebook", "Player Core"]))["legacy"] == 0
+    assert to_row(doc("x-2", source=["Secrets of Magic"]))["legacy"] == 0
+    assert to_row(doc("x-3"))["legacy"] == 0
+
+
 def test_to_row_maps_fields():
     row = to_row(doc("action-2382", legacy_id=["action-40"]))
     assert row["aon_url"] == "https://2e.aonprd.com/Actions.aspx?ID=action-2382"
@@ -142,6 +149,15 @@ def test_import_skips_unchanged_index_and_reimports_new_one(tmp_path):
     result = import_rules(db, client=rebuilt.client())
     assert result.entry_count == 1
     assert read_meta(db, "source_index") == "aon-2"
+
+
+def test_schema_change_forces_reimport(tmp_path):
+    db = tmp_path / "rules.db"
+    import_rules(db, client=FakeAon(make_docs()).client())
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE meta SET value = '1' WHERE key = 'schema_version'")
+
+    assert not import_rules(db, client=FakeAon(make_docs()).client()).skipped
 
 
 def test_failed_import_keeps_existing_db(tmp_path):

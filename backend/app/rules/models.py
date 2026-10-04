@@ -16,18 +16,22 @@ class RuleEntry(BaseModel):
 
 
 class RuleRef(BaseModel):
-    """A rules entry cited by a ruling, with the verbatim passage that was quoted."""
+    """A rules entry cited by a ruling: its full rules-as-written text and the deciding passage."""
 
     entry_id: str
     category: str
     name: str
     aon_url: str
-    quote: str
+    source: str | None = None
+    text: str  # full verbatim entry text, shown before the ruling
+    quote: str  # the passage the ruling relies on; verified to occur in ``text``
     # Filled from the Foundry UUID index, never by the LLM.
     foundry_uuid: str | None = None
 
 
 class Ruling(BaseModel):
+    """Rules as written first (``raw``), then the ruling for the situation (``interpretation``)."""
+
     query: str
     raw: list[RuleRef]
     interpretation: str
@@ -49,4 +53,4 @@ class RulingRequest(BaseModel):
     mode: Literal["public", "gm"] = "public"
     user: str | None = None
     context: RulingContext | None = None
-    render: Literal["none", "foundry", "discord"] = "none"
+    render: Literal["none", "foundry"] = "none"

@@ -11,6 +11,9 @@ from pathlib import Path
 
 from app.rules.models import RuleEntry
 
+# Bump when the schema changes; the importer rebuilds a DB with an older version.
+SCHEMA_VERSION = "2"
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS entries (
     id        TEXT PRIMARY KEY,          -- AoN document id, e.g. "action-2382"
@@ -20,10 +23,11 @@ CREATE TABLE IF NOT EXISTS entries (
     traits    TEXT NOT NULL DEFAULT '[]',-- JSON array of trait names
     text      TEXT NOT NULL,             -- verbatim rules text, plain text
     markdown  TEXT,                      -- original AoN markdown (links, layout)
-    source    TEXT                       -- book and page
+    source    TEXT,                      -- book and page
+    legacy    INTEGER NOT NULL DEFAULT 0 -- 1 = only in pre-Remaster books; hidden from rulings
 );
 CREATE TABLE IF NOT EXISTS meta (
-    key   TEXT PRIMARY KEY,              -- source_index, imported_at, entry_count
+    key   TEXT PRIMARY KEY,              -- schema_version, source_index, imported_at, ...
     value TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS entries_name ON entries (name COLLATE NOCASE);
@@ -36,6 +40,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
 
 # Column weights for bm25: matches in the name count far more than matches in body text.
 _BM25_WEIGHTS = (10.0, 3.0, 1.0)
+_FTS_SQL = """
+SELECT e.* FROM entries_fts f JOIN entries e ON e.rowid = f.rowid
+WHERE entries_fts MATCH ? AND e.legacy = 0
+ORDER BY bm25(entries_fts, ?, ?, ?) LIMIT ?
+"""
 _TOKEN_RE = re.compile(r"[\w'-]+", re.UNICODE)
 
 
@@ -86,7 +95,7 @@ class RulesStore:
         return _row_to_entry(row) if row else None
 
     def search(self, terms: list[str], limit: int = 8) -> list[RuleEntry]:
-        """Exact name matches first, then full-text matches ranked by bm25."""
+        """Exact name matches first, then full-text matches ranked by bm25. Skips legacy entries."""
         terms = [t.strip() for t in terms if t.strip()]
         if not terms:
             return []
@@ -96,15 +105,14 @@ class RulesStore:
             # One lookup per term keeps exact matches in the order the terms were given.
             for term in terms:
                 for row in conn.execute(
-                    "SELECT * FROM entries WHERE name = ? COLLATE NOCASE", (term,)
+                    "SELECT * FROM entries WHERE name = ? COLLATE NOCASE AND legacy = 0", (term,)
                 ):
                     results.setdefault(row["id"], _row_to_entry(row))
 
             query = _fts_query(terms)
             if query and len(results) < limit:
                 rows = conn.execute(
-                    "SELECT e.* FROM entries_fts f JOIN entries e ON e.rowid = f.rowid "
-                    "WHERE entries_fts MATCH ? ORDER BY bm25(entries_fts, ?, ?, ?) LIMIT ?",
+                    _FTS_SQL,
                     (query, *_BM25_WEIGHTS, limit),
                 )
                 for row in rows:

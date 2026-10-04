@@ -22,3 +22,8 @@ def test_fts_query_neutralises_syntax():
 def test_get_by_id(store):
     assert store.get("Actions.aspx?ID=1").name == "Trip"
     assert store.get("missing") is None
+
+
+def test_legacy_entries_are_never_returned(store):
+    assert store.search(["Attack of Opportunity"]) == []
+    assert all(e.id != "action-8" for e in store.search(["melee", "Strike", "prone"]))

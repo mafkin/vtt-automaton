@@ -37,6 +37,16 @@ FIXTURE_ENTRIES = [
         "text": "Fixture: You take a circumstance penalty to your AC.",
         "source": "Fixture",
     },
+    {
+        "id": "action-8",
+        "category": "action",
+        "name": "Attack of Opportunity",
+        "aon_url": "https://2e.aonprd.com/Actions.aspx?ID=8",
+        "traits": [],
+        "text": "Fixture: legacy reaction. Make a melee Strike against the target who fell prone.",
+        "source": "Fixture legacy",
+        "legacy": 1,
+    },
 ]
 
 
@@ -46,9 +56,9 @@ def rules_db(tmp_path: Path) -> Path:
     conn = sqlite3.connect(path)
     create_schema(conn)
     conn.executemany(
-        "INSERT INTO entries (id, category, name, aon_url, traits, text, source) "
-        "VALUES (:id, :category, :name, :aon_url, :traits, :text, :source)",
-        [{**e, "traits": json.dumps(e["traits"])} for e in FIXTURE_ENTRIES],
+        "INSERT INTO entries (id, category, name, aon_url, traits, text, source, legacy) "
+        "VALUES (:id, :category, :name, :aon_url, :traits, :text, :source, :legacy)",
+        [{"legacy": 0, **e, "traits": json.dumps(e["traits"])} for e in FIXTURE_ENTRIES],
     )
     rebuild_fts(conn)
     conn.commit()

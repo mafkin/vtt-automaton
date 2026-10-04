@@ -25,7 +25,7 @@ from pathlib import Path
 import httpx
 
 from app.ingest.aon_text import markdown_to_text
-from app.rules.store import create_schema, rebuild_fts
+from app.rules.store import SCHEMA_VERSION, create_schema, rebuild_fts
 
 log = logging.getLogger(__name__)
 
@@ -36,15 +36,34 @@ USER_AGENT = "vtt-automaton rules import (+https://github.com/mafkin/vtt-automat
 # Navigation and bibliography pages, not rules.
 SKIPPED_CATEGORIES = frozenset({"category-page", "source"})
 
+# Pre-Remaster books that Remaster editions replace (AoN `source` names, lowercased). AoN has no
+# legacy flag, and only links some legacy entries to their Remaster version (`remaster_id`), so an
+# entry found *only* in these books is marked legacy: kept in the DB, never used for rulings.
+# Older books without a Remaster edition (Secrets of Magic, Book of the Dead, ...) stay current.
+LEGACY_SOURCES = frozenset(
+    {
+        "core rulebook",
+        "advanced player's guide",
+        "gamemastery guide",
+        "bestiary",
+        "bestiary 2",
+        "bestiary 3",
+        "treasure vault",
+        "guns & gears",
+        "dark archive",
+    }
+)
+
 _SOURCE_FIELDS = [
     "id", "category", "name", "url", "markdown", "trait", "primary_source_raw",
-    "remaster_id", "exclude_from_search",
+    "remaster_id", "exclude_from_search", "source",
 ]  # fmt: skip
 
 
 _INSERT_SQL = """
-INSERT OR REPLACE INTO entries (id, category, name, aon_url, traits, text, markdown, source)
-VALUES (:id, :category, :name, :aon_url, :traits, :text, :markdown, :source)
+INSERT OR REPLACE INTO entries
+    (id, category, name, aon_url, traits, text, markdown, source, legacy)
+VALUES (:id, :category, :name, :aon_url, :traits, :text, :markdown, :source, :legacy)
 """
 
 
@@ -53,6 +72,7 @@ class ImportResult:
     skipped: bool
     source_index: str
     entry_count: int = 0
+    legacy_count: int = 0
 
 
 class AonClient:
@@ -112,6 +132,7 @@ def to_row(doc: dict) -> dict | None:
     if not doc.get("name") or not text:
         return None
     url = doc.get("url") or ""
+    sources = {s.lower() for s in doc.get("source") or []}
     return {
         "id": doc["id"],
         "category": doc["category"],
@@ -121,6 +142,7 @@ def to_row(doc: dict) -> dict | None:
         "text": text,
         "markdown": markdown,
         "source": doc.get("primary_source_raw"),
+        "legacy": int(bool(sources) and sources <= LEGACY_SOURCES),
     }
 
 
@@ -140,7 +162,11 @@ def import_rules(
 ) -> ImportResult:
     client = client or AonClient()
     source_index = client.current_index()
-    if not force and read_meta(db_path, "source_index") == source_index:
+    up_to_date = (
+        read_meta(db_path, "source_index") == source_index
+        and read_meta(db_path, "schema_version") == SCHEMA_VERSION
+    )
+    if not force and up_to_date:
         log.info("Rules DB is up to date with %s", source_index)
         return ImportResult(skipped=True, source_index=source_index)
 
@@ -166,12 +192,15 @@ def import_rules(
         if count == 0:
             raise RuntimeError("AoN returned no importable entries; keeping the existing DB")
         rebuild_fts(conn)
+        legacy_count = conn.execute("SELECT COUNT(*) FROM entries WHERE legacy = 1").fetchone()[0]
         conn.executemany(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
             [
+                ("schema_version", SCHEMA_VERSION),
                 ("source_index", source_index),
                 ("imported_at", datetime.now(UTC).isoformat(timespec="seconds")),
                 ("entry_count", str(count)),
+                ("legacy_count", str(legacy_count)),
             ],
         )
         conn.commit()
@@ -183,8 +212,10 @@ def import_rules(
 
     # Atomic swap: requests already holding the old file finish against it, new ones see the new.
     os.replace(tmp_path, db_path)
-    log.info("Rules DB updated: %d entries from %s", count, source_index)
-    return ImportResult(skipped=False, source_index=source_index, entry_count=count)
+    log.info("Rules DB updated: %d entries (%d legacy) from %s", count, legacy_count, source_index)
+    return ImportResult(
+        skipped=False, source_index=source_index, entry_count=count, legacy_count=legacy_count
+    )
 
 
 def _insert(conn: sqlite3.Connection, rows: list[dict]) -> int:
