@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="VTT_", env_file=".env", extra="ignore")
 
     rules_db_path: Path = Path("data/pf2e_remaster.db")
+    # The table's own data: sessions and transcripts.
+    sessions_db_path: Path = Path("data/sessions.db")
 
     # Tokens issued to clients (one per Foundry world / Discord guild), comma separated.
     client_tokens: Annotated[list[str], NoDecode] = Field(default_factory=list)

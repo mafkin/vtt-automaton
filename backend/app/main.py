@@ -6,13 +6,14 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import foundry_ws, rulings, voice
+from app.api import foundry_ws, rulings, sessions, voice
 from app.config import Settings, get_settings
 from app.foundry.hub import FoundryHub
 from app.ingest.scheduler import refresh_rules_periodically
 from app.llm.base import LLMProvider
 from app.rules.service import RulesService
 from app.rules.store import RulesStore
+from app.sessions.store import SessionStore
 from app.voice.service import VoiceRulesService
 
 
@@ -53,6 +54,7 @@ def create_app(settings: Settings | None = None, llm: LLMProvider | None = None)
         max_entries=settings.max_retrieved_entries,
         max_chars=settings.max_ruling_chars,
     )
+    app.state.session_store = SessionStore(settings.sessions_db_path)
     app.state.foundry_hub = FoundryHub()
     app.state.voice_service = VoiceRulesService(
         app.state.rules_service,
@@ -75,6 +77,7 @@ def create_app(settings: Settings | None = None, llm: LLMProvider | None = None)
 
     app.include_router(rulings.router)
     app.include_router(voice.router)
+    app.include_router(sessions.router)
     app.include_router(foundry_ws.router)
     return app
 
