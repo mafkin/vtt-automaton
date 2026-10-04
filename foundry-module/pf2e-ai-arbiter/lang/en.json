@@ -1,6 +1,6 @@
 {
   "ARBITER.Settings.BackendUrl.Name": "Backend URL",
-  "ARBITER.Settings.BackendUrl.Hint": "Address of the VTT Automaton backend, e.g. https://arbiter.example.com",
+  "ARBITER.Settings.BackendUrl.Hint": "Address of the VTT Automaton backend, e.g. https://arbiter.ttrpg-arbiter.org",
   "ARBITER.Settings.Token.Name": "Client token (GM only)",
   "ARBITER.Settings.Token.Hint": "Stored only in this browser. Only the GM's browser connects to the backend; players can leave this empty.",
   "ARBITER.Settings.SpeakerName.Name": "Speaker name",

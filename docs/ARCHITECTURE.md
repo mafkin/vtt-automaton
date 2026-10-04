@@ -336,7 +336,7 @@ mixed content). The backend listens on `127.0.0.1:8765` and is published through
 
 | Option | How | Trade-off |
 |--------|-----|-----------|
-| **Cloudflare Tunnel** (chosen) | `cloudflared` container → `https://arbiter.<your-domain>` | No open ports, works from any GM device; needs a domain on Cloudflare. Endpoint is public, protected by client token + CORS. |
+| **Cloudflare Tunnel** (chosen) | `cloudflared` container → `https://arbiter.ttrpg-arbiter.org` | No open ports, works from any GM device; needs a domain on Cloudflare. Endpoint is public, protected by client token + CORS. |
 | Tailscale Serve | `tailscale serve` → `https://<host>.<tailnet>.ts.net` | Not reachable from the internet at all, but the GM's machine must be on the tailnet. Works because only the GM client connects. |
 | Port forward + Caddy | Router forward 443 → Caddy with Let's Encrypt | Most moving parts; exposes the home IP. |
 
