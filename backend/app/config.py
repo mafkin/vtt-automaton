@@ -28,6 +28,9 @@ class Settings(BaseSettings):
 
     max_retrieved_entries: int = 8
 
+    # Upper bound for the rules text plus the ruling shown in chat, in characters.
+    max_ruling_chars: int = 3000
+
     # How often to check Archives of Nethys for a new data build (hours). 0 disables.
     rules_refresh_hours: float = 24
 

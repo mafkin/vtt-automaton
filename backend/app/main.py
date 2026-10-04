@@ -48,6 +48,7 @@ def create_app(settings: Settings | None = None, llm: LLMProvider | None = None)
         llm or build_llm(settings),
         answer_language=settings.answer_language,
         max_entries=settings.max_retrieved_entries,
+        max_chars=settings.max_ruling_chars,
     )
 
     if settings.cors_origins:

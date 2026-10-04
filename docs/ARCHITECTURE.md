@@ -114,9 +114,13 @@ class Ruling(BaseModel):
 ### 3.3 Renderer (Foundry only)
 - **Foundry renderer.** Produces chat-card HTML with `@UUID[Compendium.pf2e...]{Name}` links and
   inline checks (`@Check[...]` / `[[/act ...]]`). It uses the PF2e chat-card CSS classes.
-- Layout: "Säännöt (RAW)" with the **full** text of each cited entry, then "Tulkinta" with the
-  ruling and a confidence label. Nothing is clipped. Entries over ~1500 characters (whole rules
-  sections) start collapsed in a `<details>` block so they don't flood the chat log.
+- Layout: "Säännöt (RAW)" with the text of each cited entry, then "Tulkinta" with the ruling
+  and a confidence label.
+- **Length budget: RAW + ruling ≤ 3000 characters** (`VTT_MAX_RULING_CHARS`). The LLM is asked
+  for at most 3 citations and a ruling of about 600 characters; the ruling is hard-capped at
+  1000 characters on a sentence boundary. Cited entries are shown whole while they fit (a typical
+  action or condition is 400–600 characters). An entry that doesn't fit (e.g. a long rules
+  section or a class) shows only its verified cited passage, with a link to the full rule on AoN.
 
 ### 3.4 Foundry UUID index
 The AoN DB has no Foundry IDs. A build step reads the compendium packs from the **pf2e system

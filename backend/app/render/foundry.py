@@ -5,10 +5,6 @@ from html import escape
 from app.render.labels import labels_for
 from app.rules.models import RuleRef, Ruling
 
-# The full rules text is always printed in Foundry chat. Entries longer than this (e.g. whole
-# rules sections) start collapsed so they don't flood the chat log; one click expands them.
-_COLLAPSE_OVER_CHARS = 1500
-
 
 def _link(ref: RuleRef) -> str:
     if ref.foundry_uuid:
@@ -25,21 +21,24 @@ def _paragraphs(text: str) -> str:
     )
 
 
-def _raw_block(ref: RuleRef) -> str:
+def _raw_block(ref: RuleRef, labels: dict) -> str:
     source = f' <span class="arbiter-source">{escape(ref.source)}</span>' if ref.source else ""
-    header = f"{_link(ref)}{source}"
     body = _paragraphs(ref.text)
-    if len(ref.text) > _COLLAPSE_OVER_CHARS:
-        content = f"<details><summary>{header}</summary>{body}</details>"
-    else:
-        content = f"<header>{header}</header>{body}"
+    if ref.partial:
+        body += (
+            f'<p class="arbiter-more">… <a href="{escape(ref.aon_url)}" target="_blank" '
+            f'rel="noopener">{labels["full_rule"]}</a></p>'
+        )
     entry = escape(ref.entry_id)
-    return f'<blockquote class="arbiter-raw" data-entry="{entry}">{content}</blockquote>'
+    return (
+        f'<blockquote class="arbiter-raw" data-entry="{entry}">'
+        f"<header>{_link(ref)}{source}</header>{body}</blockquote>"
+    )
 
 
 def render_foundry(ruling: Ruling, language: str = "Finnish") -> str:
     labels = labels_for(language)
-    raw = "".join(_raw_block(ref) for ref in ruling.raw)
+    raw = "".join(_raw_block(ref, labels) for ref in ruling.raw)
     confidence = labels["confidence"][ruling.confidence]
     if ruling.raw_only:
         confidence += f" · {labels['raw_only']}"

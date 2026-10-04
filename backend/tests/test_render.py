@@ -31,12 +31,11 @@ def test_foundry_shows_full_raw_then_ruling():
     assert "Player Core pg. 1" in html
 
 
-def test_foundry_prints_long_entries_in_full_collapsed():
-    text = "word " * 2000
-    html = render_foundry(ruling([ref("Encounter Mode", text), ref("Prone", "Short.", 1)]))
-    assert html.count("word") == 2000
-    assert html.count("<details>") == 1
-    assert "<header>" in html  # the short entry is shown open
+def test_foundry_partial_entry_links_to_full_rule():
+    partial = ref("Encounter Mode", "Only the cited passage.").model_copy(update={"partial": True})
+    html = render_foundry(ruling([partial, ref("Prone", "Short.", 1)]))
+    assert html.count("Koko sääntö Archives of Nethysissä") == 1
+    assert "<details>" not in html
 
 
 def test_foundry_english_labels():

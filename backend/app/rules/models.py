@@ -23,8 +23,11 @@ class RuleRef(BaseModel):
     name: str
     aon_url: str
     source: str | None = None
-    text: str  # full verbatim entry text, shown before the ruling
-    quote: str  # the passage the ruling relies on; verified to occur in ``text``
+    # Verbatim RAW shown before the ruling: the whole entry, or only the cited passage when the
+    # whole entry would not fit the length budget (``partial``; full text is on AoN).
+    text: str
+    quote: str  # the passage the ruling relies on; verified to occur in the entry text
+    partial: bool = False
     # Filled from the Foundry UUID index, never by the LLM.
     foundry_uuid: str | None = None
 

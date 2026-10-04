@@ -15,6 +15,11 @@ log = logging.getLogger(__name__)
 _WS_RE = re.compile(r"\s+")
 _FALLBACK_QUOTE_CHARS = 700
 _FALLBACK_ENTRIES = 3
+# Hard cap for the ruling text; the prompt asks for well under this.
+_INTERPRETATION_MAX_CHARS = 1000
+# Excerpts shorter than this are not worth showing; the entry is dropped instead.
+_MIN_EXCERPT_CHARS = 60
+_SENTENCE_END_RE = re.compile(r"[.!?](?=\s|$)")
 
 _RAW_ONLY_MESSAGE = {
     "Finnish": "Tulkintaa ei voitu muodostaa luotettavasti. Alla on hakua vastaavat säännöt (RAW).",
@@ -65,14 +70,18 @@ You are given rules entries retrieved from Archives of Nethys. They are your ONL
 The answer is shown in two parts, in this order: first the rules as written (RAW) for every
 entry you cite, then your ruling. The ruling must therefore build on the cited RAW.
 
+The whole answer (RAW plus ruling) must fit in {max_chars} characters, so be selective and brief.
+
 Output contract:
-1. citations: every entry the ruling depends on, most important first. For each, give its
-   entry_id and quote the deciding passage character for character from that entry's text.
-   Never paraphrase a quote. Do not cite entries that do not matter for the question.
-2. interpretation: the ruling for the situation, written in {language}. Apply the cited RAW to
-   the situation step by step and finish with a clear verdict. Keep official English game terms
-   (action, condition and trait names) in English. If the RAW does not settle the question, say
-   so plainly and leave the call to the GM; do not invent rules.
+1. citations: the entries the ruling depends on, most important first, at most 3. For each,
+   give its entry_id and quote the shortest passage that decides the question, character for
+   character from that entry's text. Never paraphrase a quote. Do not cite entries that do not
+   matter for the question.
+2. interpretation: the ruling for the situation, written in {language}, at most
+   {ruling_chars} characters. Apply the cited RAW to the situation and finish with a clear
+   verdict. Keep official English game terms (action, condition and trait names) in English.
+   If the RAW does not settle the question, say so plainly and leave the call to the GM;
+   do not invent rules.
 3. confidence: high if the RAW settles it directly, medium if it needs interpretation,
    low if the RAW barely covers it."""
 
@@ -86,6 +95,35 @@ def _truncate(text: str, limit: int) -> str:
         return text
     cut = text.rfind(" ", 0, limit)
     return text[: cut if cut > 0 else limit]
+
+
+def _clip_sentences(text: str, limit: int) -> str:
+    """Clip to ``limit`` characters, ending at a sentence boundary when possible."""
+    if len(text) <= limit:
+        return text
+    ends = [m.end() for m in _SENTENCE_END_RE.finditer(text, 0, limit)]
+    return text[: ends[-1]] if ends else _truncate(text, limit - 2) + " …"
+
+
+def fit_to_budget(refs: list[RuleRef], budget: int) -> list[RuleRef]:
+    """Keep the RAW within ``budget`` characters, in citation order.
+
+    An entry is shown whole if it fits; otherwise only its cited passage (``partial``), clipped
+    if that is still too long. Entries with no room left are dropped.
+    """
+    fitted: list[RuleRef] = []
+    remaining = budget
+    for ref in refs:
+        if len(ref.text) <= remaining:
+            fitted.append(ref)
+            remaining -= len(ref.text)
+            continue
+        excerpt = ref.quote if len(ref.quote) <= remaining else _truncate(ref.quote, remaining)
+        if len(excerpt) < _MIN_EXCERPT_CHARS and fitted:
+            continue
+        fitted.append(ref.model_copy(update={"text": excerpt, "partial": True}))
+        remaining -= len(excerpt)
+    return fitted
 
 
 def _format_entries(entries: list[RuleEntry]) -> str:
@@ -118,11 +156,14 @@ class RulesService:
         llm: LLMProvider,
         answer_language: str = "Finnish",
         max_entries: int = 8,
+        max_chars: int = 3000,
     ) -> None:
         self._store = store
         self._llm = llm
         self._language = answer_language
         self._max_entries = max_entries
+        self._max_chars = max_chars
+        self._ruling_chars = min(_INTERPRETATION_MAX_CHARS, max_chars // 3)
 
     async def rule(self, request: RulingRequest) -> Ruling:
         analysis = await self._analyse(request.query)
@@ -132,7 +173,11 @@ class RulesService:
 
         try:
             draft = await self._llm.generate_json(
-                system=RULING_SYSTEM.format(language=self._language),
+                system=RULING_SYSTEM.format(
+                    language=self._language,
+                    max_chars=self._max_chars,
+                    ruling_chars=self._ruling_chars * 3 // 5,
+                ),
                 prompt=self._ruling_prompt(request, analysis, entries),
                 schema=RulingDraft,
             )
@@ -145,10 +190,11 @@ class RulesService:
             log.warning("No valid citations in ruling draft; returning RAW only")
             return self._raw_only(request.query, entries)
 
+        interpretation = _clip_sentences(draft.interpretation.strip(), self._ruling_chars)
         return Ruling(
             query=request.query,
-            raw=refs,
-            interpretation=draft.interpretation.strip(),
+            raw=fit_to_budget(refs, self._max_chars - len(interpretation)),
+            interpretation=interpretation,
             confidence=draft.confidence,
         )
 
@@ -182,6 +228,8 @@ class RulesService:
         by_id = {e.id: e for e in entries}
         refs: list[RuleRef] = []
         for c in citations:
+            if any(r.entry_id == c.entry_id for r in refs):
+                continue  # one block per entry; the first (most important) quote wins
             entry = by_id.get(c.entry_id)
             quote = _normalize(c.quote)
             if entry is None or not quote:
@@ -194,14 +242,15 @@ class RulesService:
         return refs
 
     def _raw_only(self, query: str, entries: list[RuleEntry]) -> Ruling:
+        message = _RAW_ONLY_MESSAGE.get(self._language, _RAW_ONLY_MESSAGE_DEFAULT)
         refs = [
             _ref(e, _truncate(_normalize(e.text), _FALLBACK_QUOTE_CHARS))
             for e in entries[:_FALLBACK_ENTRIES]
         ]
         return Ruling(
             query=query,
-            raw=refs,
-            interpretation=_RAW_ONLY_MESSAGE.get(self._language, _RAW_ONLY_MESSAGE_DEFAULT),
+            raw=fit_to_budget(refs, self._max_chars - len(message)),
+            interpretation=message,
             confidence="low",
             raw_only=True,
         )
