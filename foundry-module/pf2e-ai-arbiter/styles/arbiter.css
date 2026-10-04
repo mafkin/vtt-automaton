@@ -1,0 +1,56 @@
+.vtt-arbiter h3 {
+  margin: 0.4em 0 0.2em;
+  font-size: var(--font-size-14, 14px);
+  border-bottom: 1px solid var(--color-border-light-2, #b5b3a4);
+}
+
+.vtt-arbiter .arbiter-raw {
+  margin: 0.3em 0;
+  padding: 0.3em 0.5em;
+  border-left: 3px solid #5d4037;
+  background: rgba(93, 64, 55, 0.08);
+  font-size: var(--font-size-12, 12px);
+}
+
+.vtt-arbiter .arbiter-raw header {
+  font-weight: bold;
+  margin-bottom: 0.2em;
+}
+
+.vtt-arbiter .arbiter-source {
+  font-weight: normal;
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.vtt-arbiter .arbiter-raw p {
+  margin: 0.2em 0;
+}
+
+.vtt-arbiter .arbiter-confidence {
+  font-weight: normal;
+  font-size: var(--font-size-11, 11px);
+  opacity: 0.8;
+}
+
+.vtt-arbiter[data-confidence="high"] .arbiter-ruling h3 { border-color: #2e7d32; }
+.vtt-arbiter[data-confidence="medium"] .arbiter-ruling h3 { border-color: #f9a825; }
+.vtt-arbiter[data-confidence="low"] .arbiter-ruling h3 { border-color: #c62828; }
+
+.vtt-arbiter-pending {
+  font-style: italic;
+  opacity: 0.8;
+}
+
+.vtt-arbiter-error {
+  color: #c62828;
+}
+
+.arbiter-question .arbiter-gm-only {
+  margin-left: 0.4em;
+  padding: 0 0.3em;
+  border-radius: 3px;
+  background: #5d4037;
+  color: #fff;
+  font-size: var(--font-size-10, 10px);
+}

@@ -40,3 +40,22 @@ curl -s localhost:8765/api/v1/rulings \
 ```
 
 Tests: `uv run pytest`. Lint: `uv run ruff check . && uv run ruff format --check .`
+
+## Foundry module
+
+`foundry-module/pf2e-ai-arbiter`. Install on Molten from the manifest URL
+`https://github.com/mafkin/vtt-automaton/releases/latest/download/module.json` (published by
+tagging `module-vX.Y.Z`). In the module settings set the backend URL (your Cloudflare hostname)
+and, **in the GM's browser**, the client token.
+
+- `/rule <question>`: public ruling. `/gmrule <question>`: whispered to the GM.
+- Spoken questions: say "Nethys, …" at the table; once transcription runs, the ruling appears in
+  chat. To try it now, with the GM connected in Foundry:
+
+```bash
+curl -s https://arbiter.<your-domain>/api/v1/transcript/segments \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"speaker": "Aino", "text": "Nethys, kaatuuko örkki jos teen Tripin?"}'
+```
+
+Tests: `cd foundry-module/pf2e-ai-arbiter && npm test`.

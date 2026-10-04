@@ -193,15 +193,21 @@ directly.) Keeping the adapter swappable makes it easy to compare models on the 
 ## 4. Client adapters
 
 ### 4.1 Foundry module (`foundry-module/pf2e-ai-arbiter`)
-- **Only the active GM client keeps the backend connection** (`game.users.activeGM`).
-  Player commands go to it through `game.socket` (manifest `"socket": true`). The GM client calls
-  the backend and creates the `ChatMessage` with the configured speaker alias and whisper targets.
-- Intercepts `/rule`, `/gmrule`, `/npc` in `Hooks.on("chatMessage")`, which returns `false`.
-- Shows a temporary "Consulting the Archives…" message and replaces it when the result arrives.
-- Collects context (controlled token, targets, distances, conditions) on the calling client and
-  sends it along with the query.
-- Sends `GameEvent`s (rolls, combat updates) when a session is active.
-- Settings: backend URL, client token (world setting, GM only), speaker name and avatar.
+- **Only the active GM's browser keeps the backend connection** (`game.users.activeGM`), a
+  WebSocket to `wss://<backend>/ws/foundry` through the Cloudflare tunnel. It is two-way, so the
+  backend can also push voice-asked rulings (§4.3). Auth is a `hello` message with the client
+  token; the backend also checks the page origin (the Molten world URL). Keep-alive ping every
+  25 s (Cloudflare drops idle sockets after ~100 s); reconnects with backoff.
+- `/rule <question>` (public) and `/gmrule <question>` (whispered to GMs) are intercepted in
+  `Hooks.on("chatMessage")`. Players' commands reach the GM's browser through the module socket
+  (`"socket": true`). The GM's browser creates every chat card, so whispers and permissions are
+  handled in one place: a "Selataan arkistoja…" card first, updated in place with the result.
+- Context sent with chat questions: the asker's controlled token (or character) and targets.
+- Settings: backend URL (world), client token (**client scope**: stored only in the GM's browser,
+  never synced to players), speaker name, and an on/off switch for voice rulings.
+- Released by tagging `module-vX.Y.Z`; CI publishes `module.json` + zip to GitHub releases, and
+  Molten installs it from the manifest URL.
+- Later: `GameEvent`s (rolls, combat) for the session timeline, `@UUID` links, `/npc`.
 
 ### 4.2 Discord bot (`discord-bot/`, TypeScript, discord.js + @discordjs/voice)
 - Job: **transcription only**. No rules commands; rulings live in Foundry.
@@ -214,23 +220,42 @@ directly.) Keeping the adapter swappable makes it easy to compare models on the 
 
 ---
 
-## 5. Protocol (WebSocket, JSON envelopes)
+### 4.3 Voice-asked rulings (transcript → Foundry)
+Saves typing: a rules question asked out loud at the table is answered in Foundry chat.
+- **Trigger:** the wake word (default "Nethys", `VTT_WAKE_WORDS`) anywhere in a transcript
+  segment; the rest of the segment is the question. Fuzzy matching tolerates STT spelling
+  ("Nethis") and Finnish endings ("Nethysiltä") without firing on ordinary words ("netissä").
+  If only the wake word is heard, the same speaker's next segment within 8 s is the question.
+- **Secret:** "Nethys, salaa …" → GM-only ruling (whispered), like `/gmrule`.
+- **Context:** the last 90 s of table talk (all speakers) goes to the LLM as situation context,
+  marked as speech-to-text that may contain errors. Rules text still comes only from the DB.
+- **Visible:** the card header shows "🎙 Kuultu: <speaker>: <what was heard>", so a misheard
+  question is obvious at once. The same question within 30 s is ignored (two people repeating
+  it); nothing is sent to the LLM when no Foundry GM client is connected.
+- **Entry point:** `POST /api/v1/transcript/segments {speaker, text, t}`. The transcription
+  worker (phase 3) calls the same service in-process; until then the endpoint can be used to
+  test by hand. Latency budget: segment end → STT (~1–2 s on GPU) → ruling (~3–6 s).
+
+## 5. Protocol (Foundry WebSocket, JSON, version 1)
 
 ```jsonc
 // client → server
-{ "type": "ruling.request", "id": "c1", "mode": "public|gm|npc",
-  "query": "Can I reach the archer?",
-  "user": { "foundryId": "...", "name": "...", "isGM": false },
-  "context": { "sceneId": "...", "actor": {...}, "targets": [...], "distances": {...} } }
-{ "type": "session.event", "sessionId": "...", "event": { "kind": "roll", "t": 1730000000.12, ... } }
+{ "type": "hello", "v": 1, "token": "..." }                       // first message
+{ "type": "ruling.request", "id": "c1",
+  "request": { "query": "...", "mode": "public|gm", "user": "Aino", "render": "foundry",
+               "context": { "actor": "Valeros", "targets": ["Orc"] } } }
+{ "type": "ping" }
 
 // server → client
-{ "type": "ruling.pending", "id": "c1" }
-{ "type": "ruling.result",  "id": "c1", "html": "...", "ruling": { /* neutral model */ } }
-{ "type": "journal.upsert", "sessionId": "...", "name": "Session 12 — ...", "html": "..." }
-{ "type": "error", "id": "c1", "code": "rules.no_match", "message": "..." }
+{ "type": "welcome", "v": 1 }
+{ "type": "ruling.pending", "id": "c1", "origin": "chat" }
+{ "type": "ruling.pending", "id": "voice-…", "origin": "voice",
+  "speaker": "Aino", "query": "...", "mode": "public" }             // server-initiated
+{ "type": "ruling.result", "id": "…", "origin": "chat|voice", "html": "...", "ruling": {...} }
+{ "type": "ruling.error",  "id": "…", "origin": "chat|voice", "code": "rules.no_match", "message": "..." }
+{ "type": "pong" }
+// later: { "type": "journal.upsert", ... } for recaps; client "session.event" for game events
 ```
-The protocol is versioned (`"v": 1`) so the module and backend can be released separately.
 
 ---
 
@@ -261,9 +286,9 @@ vtt-automaton/
 | Phase | Milestone | Done when |
 |-------|-----------|-----------|
 | 0 ✅ | Skeleton | Monorepo, compose, CI (lint + tests), config/secrets layout |
-| 1 🚧 | Rules core MVP | `POST /rulings` returns a validated `Ruling` from the AoN DB + Gemini; `curl` and pytest eval set pass |
-| 2 | Foundry module MVP | `/rule` and `/gmrule` work from player clients through the GM relay; pending message; UUID links resolve |
-| 3 | Session capture | `/session start` records per-user audio → transcripts in DB, with a speaker↔actor map |
+| 1 ✅ | Rules core MVP | `POST /rulings` returns a validated `Ruling` from the AoN DB + Gemini; `curl` and pytest eval set pass |
+| 2 🚧 | Foundry module MVP | `/rule` and `/gmrule` work from player clients through the GM relay; pending message; voice-asked rulings via the transcript endpoint |
+| 3 | Session capture | `/session start` records per-user audio → transcripts in DB, with a speaker↔actor map; live segments feed voice rulings |
 | 4 | Recaps | Combined timeline → recap JournalEntry, after GM review |
 | 5 | Game-state depth | Combat context in rulings, `/npc` roleplay from stat blocks, live captions |
 

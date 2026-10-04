@@ -218,7 +218,15 @@ class RulesService:
             f"Question (English): {analysis.question_en}",
         ]
         if request.context:
-            parts.append(f"Game state: {request.context.model_dump_json(exclude_none=True)}")
+            state = request.context.model_dump_json(exclude_none=True, exclude={"transcript"})
+            if state != "{}":
+                parts.append(f"Game state: {state}")
+            if request.context.transcript:
+                parts.append(
+                    "Recent table talk before the question (automatic speech-to-text, Finnish, "
+                    "may contain recognition errors; use it only to understand the situation):\n"
+                    + "\n".join(request.context.transcript)
+                )
         parts.append("Rules entries:\n" + _format_entries(entries))
         return "\n\n".join(parts)
 

@@ -49,6 +49,8 @@ class RulingContext(BaseModel):
     actor: str | None = None
     targets: list[str] = Field(default_factory=list)
     notes: str | None = None
+    # Recent table talk from the live transcript ("Speaker: text"), for voice-asked questions.
+    transcript: list[str] = Field(default_factory=list, max_length=200)
 
 
 class RulingRequest(BaseModel):

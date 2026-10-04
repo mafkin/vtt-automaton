@@ -31,10 +31,14 @@ class Settings(BaseSettings):
     # Upper bound for the rules text plus the ruling shown in chat, in characters.
     max_ruling_chars: int = 3000
 
+    # Spoken name that turns a transcript segment into a rules question ("Nethys, voiko …").
+    # Add variants here if speech-to-text keeps misspelling it.
+    wake_words: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["Nethys"])
+
     # How often to check Archives of Nethys for a new data build (hours). 0 disables.
     rules_refresh_hours: float = 24
 
-    @field_validator("client_tokens", "cors_origins", mode="before")
+    @field_validator("client_tokens", "cors_origins", "wake_words", mode="before")
     @classmethod
     def _split_csv(cls, value: object) -> object:
         if isinstance(value, str):
