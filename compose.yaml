@@ -1,0 +1,13 @@
+# Home-server deployment. Later phases add: discord-bot (Node), stt-worker (GPU), redis.
+services:
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      VTT_RULES_DB_PATH: /data/pf2e_remaster.db
+    volumes:
+      - ./data:/data:ro
+    # Bound to localhost only; expose to the internet through a tunnel (see docs/ARCHITECTURE.md §10).
+    ports:
+      - "127.0.0.1:8765:8765"
+    restart: unless-stopped

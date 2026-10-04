@@ -1,4 +1,4 @@
-# VTT Automaton — Architecture (draft v0.1)
+# VTT Automaton — Architecture (draft v0.2)
 
 A single backend that answers Pathfinder 2e (Remaster) rules questions and records and summarizes
 game sessions. Foundry VTT and Discord connect to it as thin clients.
@@ -78,11 +78,15 @@ convert it to Foundry chat HTML with `@UUID[...]` enrichers, or to a Discord emb
   Caddy or Traefik for TLS.
 
 ### 3.2 Rules service
-1. **Parse.** Work out the intent (`rule`, `gmrule`, `npc`, `raw`) and pull out entity names.
+1. **Analyse the query (LLM).** The table asks in Finnish with English game terms mixed in, but
+   the rules DB is English. A small LLM call returns the official English Remaster names of the
+   rules elements involved plus an English translation of the question. If that call fails, the
+   words of the query itself are used as search terms.
 2. **Retrieve deterministically.** Search the AoN SQLite index (FTS5 plus exact name/trait match),
    then rank the results. Embeddings can be added later if FTS recall is poor.
 3. **Enforce the prompt.** Build a fixed two-section output contract:
-   *§1 Verbatim RAW (quoted from the retrieved rows only)*, then *§2 Interpretation for the game state*.
+   *§1 Verbatim RAW (quoted from the retrieved rows only, in English)*, then *§2 Interpretation for
+   the game state, in Finnish, keeping official English term names*.
 4. **Call the LLM** through the provider adapter and ask for structured output (JSON), not free HTML.
 5. **Validate.** Every quote must be a substring of a retrieved row. Every referenced entity must
    resolve in the UUID index. If validation fails, fall back to a "RAW only" response.
@@ -130,8 +134,16 @@ pf2e system version it was built from. This avoids the original plan's risk of t
    user**. This gives speaker labels without a diarization model.
 2. **Ingest.** The bot cuts audio into chunks of about 10–30 s at silence boundaries and uploads
    them with `(session_id, discord_user_id, t_start)`. Raw audio goes to the audio store.
-3. **Transcribe.** A worker (`faster-whisper` on GPU locally, or a hosted STT API, configurable)
-   takes chunk jobs from Redis and writes the resulting segments.
+3. **Transcribe.** A GPU worker on the home server runs `faster-whisper` and takes chunk jobs
+   from Redis. **Finnish with English game terms** is the hard case:
+   - Force `language="fi"` (auto-detect flips between fi/en on short chunks).
+   - Pass an `initial_prompt` / hotword list per campaign: PC and NPC names, place names and the
+     English PF2e terms the table uses (Strike, off-guard, Trip, Shield Block…).
+   - Start with `large-v3` (not `turbo`, which is weaker on lower-resource languages) and compare
+     it with Finnish fine-tuned Whisper checkpoints on a **hand-corrected 10–15 min sample of a
+     real session** (measure WER) before committing.
+   - A cleanup pass after the session (LLM, with the campaign glossary) fixes misheard names
+     before summarizing; the raw transcript is kept alongside.
 4. **Live view** (optional). Segments are pushed over the WebSocket as they finish (a "captions"
    panel in Foundry).
 5. **Retention.** Audio is deleted N days after the recap is approved. The transcript is kept.
@@ -140,7 +152,7 @@ pf2e system version it was built from. This avoids the original plan's risk of t
 Players can opt out per campaign, and their audio is then dropped at capture.
 
 ### 3.7 Recap worker
-After a session stops, the worker splits the timeline into scenes or encounters and summarizes each
+Recaps are written in Finnish. After a session stops, the worker splits the timeline into scenes or encounters and summarizes each
 one, then rolls those up into one recap. It also extracts NPCs, loot, quests, and open threads. The
 recap is pushed as `journal.upsert` (the Foundry GM client creates or updates a JournalEntry) and
 as a Discord post. The GM can review it before it is published.
@@ -165,15 +177,13 @@ directly.) Keeping the adapter swappable makes it easy to compare models on the 
 - Sends `GameEvent`s (rolls, combat updates) when a session is active.
 - Settings: backend URL, client token (world setting, GM only), speaker name and avatar.
 
-### 4.2 Discord bot (`discord-bot/`)
+### 4.2 Discord bot (`discord-bot/`, TypeScript, discord.js + @discordjs/voice)
 - Slash commands: `/rule`, `/gmrule` (ephemeral), `/session start|stop|status`, `/recap`, `/link`
   (map a Discord user to a Foundry actor).
 - Voice capture as described in §3.6.
-- **Risk to check before choosing a library:** Discord's voice E2EE (DAVE) affects whether bots can
-  receive audio. Check which library currently supports *receiving* voice under DAVE
-  (`@discordjs/voice` vs. py-cord / `discord-ext-voice-recv`). If only the Node library does,
-  the bot is a small Node service. It is a thin adapter either way, so this does not affect the
-  backend.
+- Written in Node because Discord's voice E2EE (DAVE) affects receiving audio, and the discord.js
+  voice stack is the most likely to keep up with it. **Verify DAVE voice *receive* with a spike
+  before building phase 4 on it.** The bot is a thin adapter, so the backend is unaffected.
 
 ---
 
@@ -223,8 +233,8 @@ vtt-automaton/
 
 | Phase | Milestone | Done when |
 |-------|-----------|-----------|
-| 0 | Skeleton | Monorepo, compose, CI (lint + tests), config/secrets layout |
-| 1 | Rules core MVP | `POST /rulings` returns a validated `Ruling` from the AoN DB + Gemini; `curl` and pytest eval set pass |
+| 0 ✅ | Skeleton | Monorepo, compose, CI (lint + tests), config/secrets layout |
+| 1 🚧 | Rules core MVP | `POST /rulings` returns a validated `Ruling` from the AoN DB + Gemini; `curl` and pytest eval set pass |
 | 2 | Foundry module MVP | `/rule` and `/gmrule` work from player clients through the GM relay; pending message; UUID links resolve |
 | 3 | Discord rules | `/rule` in Discord, served by the same core |
 | 4 | Session capture | `/session start` records per-user audio → transcripts in DB, with a speaker↔actor map |
@@ -248,11 +258,37 @@ vtt-automaton/
 
 ---
 
-## 9. Open decisions
+## 9. Decisions
 
-- [ ] Discord bot language (depends on DAVE voice-receive support, §4.2).
-- [ ] STT: local `faster-whisper` (GPU available?) vs. hosted API.
-- [ ] Hosting: home server vs. VPS, and how Foundry is hosted (self-hosted / Forge / Molten).
-- [ ] Storage: SQLite for v1 vs. Postgres from day one.
-- [ ] Recap review flow: auto-publish vs. GM approval.
-- [ ] Source and license of `pf2e_remaster.db` / `pf2e-lookup`: is it already a repo we can vendor in?
+| Topic | Decision |
+|-------|----------|
+| Backend hosting | Home server, Docker Compose |
+| STT | Local `faster-whisper` on the home server GPU (§3.6) |
+| Foundry | Hosted on Molten (Foundry server is not ours; only the module runs our code) |
+| Rules data | Local SQLite DB built from official rules on Archives of Nethys; schema in `backend/app/rules/store.py` |
+| Discord bot | Node / TypeScript |
+| Language | Table speaks Finnish with English game terms; RAW is quoted in English, interpretations and recaps are Finnish |
+| Backend language | Python 3.11+, FastAPI, uv |
+
+Still open:
+- [ ] Storage: SQLite for v1 vs. Postgres from day one (leaning SQLite until phase 4).
+- [ ] Recap review flow: auto-publish vs. GM approval (leaning GM approval).
+- [ ] Tunnel choice (§10).
+
+---
+
+## 10. Networking: Molten-hosted Foundry ↔ home-server backend
+
+Foundry pages are served over HTTPS from Molten, so the GM's browser can only connect to the
+backend over **HTTPS/WSS with a valid certificate** (plain `http://` or `ws://` is blocked as
+mixed content). The backend listens on `127.0.0.1:8765` and is published through a tunnel:
+
+| Option | How | Trade-off |
+|--------|-----|-----------|
+| **Cloudflare Tunnel** (recommended) | `cloudflared` container → `https://arbiter.<your-domain>` | No open ports, works from any GM device; needs a domain on Cloudflare. Endpoint is public, protected by client token + CORS. |
+| Tailscale Serve | `tailscale serve` → `https://<host>.<tailnet>.ts.net` | Not reachable from the internet at all, but the GM's machine must be on the tailnet. Works because only the GM client connects. |
+| Port forward + Caddy | Router forward 443 → Caddy with Let's Encrypt | Most moving parts; exposes the home IP. |
+
+The Discord bot runs on the same home server and only makes outbound connections.
+CORS allows only the Molten world's origin (`VTT_CORS_ORIGINS`). The Foundry module is installed
+on Molten from a manifest URL served by GitHub releases.
