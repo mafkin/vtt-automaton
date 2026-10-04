@@ -12,7 +12,26 @@ uv sync
 uv run uvicorn --factory app.main:app_factory --port 8765
 ```
 
-The rules database (`VTT_RULES_DB_PATH`) must follow the schema in `backend/app/rules/store.py`.
+### Rules database
+
+The rules DB is imported from Archives of Nethys (Remaster versions only, ~29k entries, ~130 MB,
+about a minute). The running backend checks for a new AoN build on startup and every
+`VTT_RULES_REFRESH_HOURS`, and only re-imports when AoN has changed. To import by hand:
+
+```bash
+uv run python -m app.ingest.aon            # writes VTT_RULES_DB_PATH; --force to re-import
+```
+
+### Deploy on the home server
+
+```bash
+cp .env.example .env                   # CLOUDFLARE_TUNNEL_TOKEN
+cp backend/.env.example backend/.env   # VTT_CORS_ORIGINS = your Molten world URL
+docker compose up -d --build
+```
+
+In the Cloudflare tunnel's public hostname settings, route `arbiter.<your-domain>` to
+`http://backend:8765`.
 
 ```bash
 curl -s localhost:8765/api/v1/rulings \

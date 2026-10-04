@@ -21,7 +21,9 @@ def respond(system, prompt, schema):
 
 @pytest.fixture
 def client(rules_db):
-    settings = Settings(rules_db_path=rules_db, client_tokens=[TOKEN], llm_provider="fake")
+    settings = Settings(
+        rules_db_path=rules_db, client_tokens=[TOKEN], llm_provider="fake", rules_refresh_hours=0
+    )
     return TestClient(create_app(settings, llm=FakeProvider(respond)))
 
 

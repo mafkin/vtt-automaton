@@ -1,6 +1,6 @@
 """Read-only access to the local rules database.
 
-The database is produced by a separate ingest step from Archives of Nethys. This module defines
+The database is produced by ``app.ingest.aon`` from Archives of Nethys. This module defines
 the schema that ingest must produce (``SCHEMA``) and the retrieval queries the rules service uses.
 """
 
@@ -13,13 +13,18 @@ from app.rules.models import RuleEntry
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS entries (
-    id        TEXT PRIMARY KEY,          -- stable id, e.g. AoN "Actions.aspx?ID=2310"
+    id        TEXT PRIMARY KEY,          -- AoN document id, e.g. "action-2382"
     category  TEXT NOT NULL,             -- action, condition, spell, feat, trait, rule, ...
     name      TEXT NOT NULL,             -- official English name
     aon_url   TEXT NOT NULL,
     traits    TEXT NOT NULL DEFAULT '[]',-- JSON array of trait names
     text      TEXT NOT NULL,             -- verbatim rules text, plain text
+    markdown  TEXT,                      -- original AoN markdown (links, layout)
     source    TEXT                       -- book and page
+);
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,              -- source_index, imported_at, entry_count
+    value TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS entries_name ON entries (name COLLATE NOCASE);
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(

@@ -28,6 +28,9 @@ class Settings(BaseSettings):
 
     max_retrieved_entries: int = 8
 
+    # How often to check Archives of Nethys for a new data build (hours). 0 disables.
+    rules_refresh_hours: float = 24
+
     @field_validator("client_tokens", "cors_origins", mode="before")
     @classmethod
     def _split_csv(cls, value: object) -> object:

@@ -162,6 +162,20 @@ A small interface: `complete(messages, schema) -> obj` and `embed(texts)`. Gemin
 implementation. (Note: "Antigravity" is Google's IDE, not an API; the backend calls the Gemini API
 directly.) Keeping the adapter swappable makes it easy to compare models on the rules-eval set.
 
+### 3.9 Rules import (`backend/app/ingest/`)
+- Source: the public Elasticsearch index behind the AoN site search
+  (`elasticsearch.aonprd.com/aon`), paged with `search_after`, 500 docs per request with a short
+  pause between pages. A full import takes about a minute.
+- Kept: the current version of each entry. Skipped: legacy entries that have a `remaster_id`
+  (superseded), `exclude_from_search` sub-entries (item activations), and navigation/source pages.
+  Legacy-only entries that AoN has not linked to a Remaster version (e.g. Attack of Opportunity)
+  remain; the query-analysis prompt prefers Remaster names.
+- AoN markdown is converted to plain text for quoting. The original markdown is kept too, for
+  richer rendering later.
+- The DB is written to a temp file and swapped in atomically, so requests never see a partial
+  import, and a failed import keeps the old DB. The AoN index name is stored in `meta`; the
+  periodic refresh (default every 24 h) costs one small query unless AoN has rebuilt.
+
 ---
 
 ## 4. Client adapters
@@ -265,7 +279,7 @@ vtt-automaton/
 | Backend hosting | Home server, Docker Compose |
 | STT | Local `faster-whisper` on the home server GPU (§3.6) |
 | Foundry | Hosted on Molten (Foundry server is not ours; only the module runs our code) |
-| Rules data | Local SQLite DB built from official rules on Archives of Nethys; schema in `backend/app/rules/store.py` |
+| Rules data | Local SQLite DB imported from Archives of Nethys by the backend itself (§3.9) |
 | Discord bot | Node / TypeScript |
 | Language | Table speaks Finnish with English game terms; RAW is quoted in English, interpretations and recaps are Finnish |
 | Backend language | Python 3.11+, FastAPI, uv |
@@ -273,7 +287,6 @@ vtt-automaton/
 Still open:
 - [ ] Storage: SQLite for v1 vs. Postgres from day one (leaning SQLite until phase 4).
 - [ ] Recap review flow: auto-publish vs. GM approval (leaning GM approval).
-- [ ] Tunnel choice (§10).
 
 ---
 
@@ -285,10 +298,11 @@ mixed content). The backend listens on `127.0.0.1:8765` and is published through
 
 | Option | How | Trade-off |
 |--------|-----|-----------|
-| **Cloudflare Tunnel** (recommended) | `cloudflared` container → `https://arbiter.<your-domain>` | No open ports, works from any GM device; needs a domain on Cloudflare. Endpoint is public, protected by client token + CORS. |
+| **Cloudflare Tunnel** (chosen) | `cloudflared` container → `https://arbiter.<your-domain>` | No open ports, works from any GM device; needs a domain on Cloudflare. Endpoint is public, protected by client token + CORS. |
 | Tailscale Serve | `tailscale serve` → `https://<host>.<tailnet>.ts.net` | Not reachable from the internet at all, but the GM's machine must be on the tailnet. Works because only the GM client connects. |
 | Port forward + Caddy | Router forward 443 → Caddy with Let's Encrypt | Most moving parts; exposes the home IP. |
 
-The Discord bot runs on the same home server and only makes outbound connections.
+`cloudflared` runs as a compose service; the tunnel's public hostname points at
+`http://backend:8765`. The Discord bot runs on the same home server and only makes outbound connections.
 CORS allows only the Molten world's origin (`VTT_CORS_ORIGINS`). The Foundry module is installed
 on Molten from a manifest URL served by GitHub releases.
