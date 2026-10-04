@@ -1,0 +1,9 @@
+{
+  "name": "pf2e-ai-arbiter",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check scripts/main.mjs && node --check scripts/connection.mjs && node --check scripts/commands.mjs"
+  }
+}

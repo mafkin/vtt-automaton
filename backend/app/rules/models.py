@@ -1,0 +1,61 @@
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+class RuleEntry(BaseModel):
+    """One row of the local rules database (built from Archives of Nethys)."""
+
+    id: str
+    category: str
+    name: str
+    aon_url: str
+    traits: list[str] = Field(default_factory=list)
+    text: str
+    source: str | None = None
+
+
+class RuleRef(BaseModel):
+    """A rules entry cited by a ruling: its full rules-as-written text and the deciding passage."""
+
+    entry_id: str
+    category: str
+    name: str
+    aon_url: str
+    source: str | None = None
+    # Verbatim RAW shown before the ruling: the whole entry, or only the cited passage when the
+    # whole entry would not fit the length budget (``partial``; full text is on AoN).
+    text: str
+    quote: str  # the passage the ruling relies on; verified to occur in the entry text
+    partial: bool = False
+    # Filled from the Foundry UUID index, never by the LLM.
+    foundry_uuid: str | None = None
+
+
+class Ruling(BaseModel):
+    """Rules as written first (``raw``), then the ruling for the situation (``interpretation``)."""
+
+    query: str
+    raw: list[RuleRef]
+    interpretation: str
+    confidence: Literal["high", "medium", "low"]
+    # True when the LLM output failed validation and only retrieved RAW text is returned.
+    raw_only: bool = False
+
+
+class RulingContext(BaseModel):
+    """Optional game state sent by the Foundry module (phase 6 fills this in)."""
+
+    actor: str | None = None
+    targets: list[str] = Field(default_factory=list)
+    notes: str | None = None
+    # Recent table talk from the live transcript ("Speaker: text"), for voice-asked questions.
+    transcript: list[str] = Field(default_factory=list, max_length=200)
+
+
+class RulingRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=2000)
+    mode: Literal["public", "gm"] = "public"
+    user: str | None = None
+    context: RulingContext | None = None
+    render: Literal["none", "foundry"] = "none"

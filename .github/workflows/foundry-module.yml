@@ -1,0 +1,44 @@
+name: foundry-module
+
+on:
+  push:
+    paths: ["foundry-module/**", ".github/workflows/foundry-module.yml"]
+    tags: ["module-v*"]
+  pull_request:
+    paths: ["foundry-module/**", ".github/workflows/foundry-module.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: foundry-module/pf2e-ai-arbiter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run check
+      - run: npm test
+
+  # Tag "module-v0.1.0" to publish; Foundry/Molten installs from the manifest URL in module.json.
+  release:
+    if: startsWith(github.ref, 'refs/tags/module-v')
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build module zip
+        working-directory: foundry-module/pf2e-ai-arbiter
+        run: |
+          version="${GITHUB_REF_NAME#module-v}"
+          jq --arg v "$version" '.version = $v' module.json > module.tmp && mv module.tmp module.json
+          zip -r ../../pf2e-ai-arbiter.zip module.json scripts styles lang
+          cp module.json ../../module.json
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            module.json
+            pf2e-ai-arbiter.zip
