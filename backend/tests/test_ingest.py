@@ -54,6 +54,13 @@ def test_markdown_to_text():
     )
 
 
+def test_markdown_italics_are_removed():
+    text = "An effect (such as _invisibility_) or *fear* hides you; my_var and 2d6*2 stay."
+    assert markdown_to_text(text) == (
+        "An effect (such as invisibility) or fear hides you; my_var and 2d6*2 stay."
+    )
+
+
 def test_markdown_keeps_action_glyphs_in_body():
     assert markdown_to_text('Use <actions string="Reaction" /> Shield Block.') == (
         "Use [reaction] Shield Block."

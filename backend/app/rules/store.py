@@ -11,8 +11,8 @@ from pathlib import Path
 
 from app.rules.models import RuleEntry
 
-# Bump when the schema changes; the importer rebuilds a DB with an older version.
-SCHEMA_VERSION = "2"
+# Bump when the schema or the text conversion changes; the importer rebuilds older DBs.
+SCHEMA_VERSION = "3"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS entries (
