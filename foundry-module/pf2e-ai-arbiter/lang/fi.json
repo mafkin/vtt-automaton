@@ -1,6 +1,6 @@
 {
   "ARBITER.Settings.BackendUrl.Name": "Taustapalvelun osoite",
-  "ARBITER.Settings.BackendUrl.Hint": "VTT Automaton -taustapalvelun osoite, esim. https://arbiter.example.com",
+  "ARBITER.Settings.BackendUrl.Hint": "VTT Automaton -taustapalvelun osoite, esim. https://arbiter.ttrpg-arbiter.org",
   "ARBITER.Settings.Token.Name": "Asiakastunniste (vain GM)",
   "ARBITER.Settings.Token.Hint": "Tallennetaan vain tähän selaimeen. Vain GM:n selain yhdistää taustapalveluun; pelaajat voivat jättää tämän tyhjäksi.",
   "ARBITER.Settings.SpeakerName.Name": "Puhujan nimi",

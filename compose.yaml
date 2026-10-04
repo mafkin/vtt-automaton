@@ -18,7 +18,7 @@ services:
     command: tunnel --no-autoupdate run
     environment:
       # Tunnel token from Cloudflare Zero Trust -> Networks -> Tunnels. In the tunnel's
-      # Public Hostname settings, point e.g. arbiter.<your-domain> at http://backend:8765
+      # Public Hostname settings, point arbiter.ttrpg-arbiter.org at http://backend:8765
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env}
     depends_on:
       - backend

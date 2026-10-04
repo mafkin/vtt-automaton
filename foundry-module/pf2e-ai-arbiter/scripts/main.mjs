@@ -188,7 +188,7 @@ Hooks.once("init", () => {
     config: true,
     restricted: true,
     type: String,
-    default: "",
+    default: "https://arbiter.ttrpg-arbiter.org",
     onChange: restartArbiter,
   });
   // Client scope: kept in the GM's browser only, never synced to players like world settings are.

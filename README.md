@@ -24,36 +24,34 @@ uv run python -m app.ingest.aon            # writes VTT_RULES_DB_PATH; --force t
 
 ### Deploy on the home server
 
-```bash
-cp .env.example .env                   # CLOUDFLARE_TUNNEL_TOKEN
-cp backend/.env.example backend/.env   # VTT_CORS_ORIGINS = your Molten world URL
-docker compose up -d --build
-```
+Public address: **https://arbiter.ttrpg-arbiter.org** (Cloudflare tunnel → `http://backend:8765`).
 
-In the Cloudflare tunnel's public hostname settings, route `arbiter.<your-domain>` to
-`http://backend:8765`.
+On the server, with Docker installed:
 
 ```bash
-curl -s localhost:8765/api/v1/rulings \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"query": "Mitä tapahtuu kun villisika tekee Trample?", "render": "foundry"}'
+git clone https://github.com/mafkin/vtt-automaton.git && cd vtt-automaton
+./scripts/setup-server.sh
 ```
 
-Tests: `uv run pytest`. Lint: `uv run ruff check . && uv run ruff format --check .`
+The script asks for the Cloudflare tunnel token, the Gemini API key and the Foundry (Molten)
+address. It generates the GM's client token, writes `.env` and `backend/.env`, starts the stack,
+waits for the rules import, checks the public address with a test ruling, and prints what the
+GM enters in Foundry. Re-running it keeps existing values. To update later:
+`git pull && docker compose up -d --build`.
 
 ## Foundry module
 
 `foundry-module/pf2e-ai-arbiter`. Install on Molten from the manifest URL
 `https://github.com/mafkin/vtt-automaton/releases/latest/download/module.json` (published by
-tagging `module-vX.Y.Z`). In the module settings set the backend URL (your Cloudflare hostname)
-and, **in the GM's browser**, the client token.
+tagging `module-vX.Y.Z`). The backend URL defaults to `https://arbiter.ttrpg-arbiter.org`; the GM
+only enters the client token, **in their own browser**.
 
 - `/rule <question>`: public ruling. `/gmrule <question>`: whispered to the GM.
 - Spoken questions: say "Nethys, …" at the table; once transcription runs, the ruling appears in
   chat. To try it now, with the GM connected in Foundry:
 
 ```bash
-curl -s https://arbiter.<your-domain>/api/v1/transcript/segments \
+curl -s https://arbiter.ttrpg-arbiter.org/api/v1/transcript/segments \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"speaker": "Aino", "text": "Nethys, kaatuuko örkki jos teen Tripin?"}'
 ```
