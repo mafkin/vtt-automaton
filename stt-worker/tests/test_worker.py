@@ -202,3 +202,49 @@ def test_prompt_lists_terms():
     assert build_prompt(["Nethys", "Trip"]) == (
         "Pathfinder-roolipeli suomeksi. Sanastoa: Nethys, Trip."
     )
+
+
+def test_timing_is_logged_and_reported_in_healthz(caplog):
+    class Slow(FakeTranscriber):
+        def transcribe(self, wav):
+            time.sleep(0.05)
+            return "Hyökkään."
+
+    backend = FakeBackend()
+    with caplog.at_level("INFO", logger="app.pipeline"), make_client(Slow(), backend) as client:
+        client.post("/v1/utterances", params=PARAMS, content=make_wav(2.0), headers=AUTH)
+        assert wait_for(lambda: backend.received)
+        recent = client.get("/healthz").json()["recent"]
+
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("Transcribed"))
+    assert "Transcribed 2.0 s from Aino in 0." in line
+    assert "x real time" in line and line.endswith("9 chars")
+    assert recent["utterances"] == 1
+    assert recent["audio_seconds"] == 2.0
+    assert recent["speed_x_realtime"] > 1
+
+
+def test_backlog_warning(caplog, monkeypatch):
+    monkeypatch.setattr("app.pipeline.BACKLOG_WARN_SECONDS", 0.05)
+
+    class Slow(FakeTranscriber):
+        def transcribe(self, wav):
+            time.sleep(0.1)
+            return ""
+
+    with (
+        caplog.at_level("INFO", logger="app.pipeline"),
+        make_client(Slow(), FakeBackend()) as client,
+    ):
+        for _ in range(3):
+            client.post("/v1/utterances", params=PARAMS, content=make_wav(1), headers=AUTH)
+        assert wait_for(lambda: client.get("/healthz").json()["processed"] == 3)
+
+    warnings = [r for r in caplog.records if "falling behind" in r.getMessage()]
+    assert len(warnings) == 1  # rate-limited to one per minute
+
+
+def test_stats_summary_empty():
+    from app.pipeline import Stats
+
+    assert Stats().summary() == {"utterances": 0}

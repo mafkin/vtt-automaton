@@ -3,7 +3,9 @@
 import asyncio
 import contextlib
 import logging
-from dataclasses import dataclass
+import time
+from collections import deque
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -12,6 +14,10 @@ from app.transcriber import Transcriber
 log = logging.getLogger(__name__)
 
 _RETRY_DELAYS = (1, 2, 4, 8)
+
+# Waiting longer than this in the queue means transcription is falling behind the table.
+BACKLOG_WARN_SECONDS = 5.0
+_BACKLOG_WARN_INTERVAL = 60.0
 
 
 @dataclass(frozen=True)
@@ -23,6 +29,39 @@ class Utterance:
     t_start: float
     duration: float
     wav: bytes
+    queued_at: float = field(default_factory=time.monotonic, compare=False)
+
+
+@dataclass(frozen=True)
+class Timing:
+    audio: float  # seconds of speech
+    wait: float  # seconds spent in the queue
+    work: float  # seconds the model took
+
+
+class Stats:
+    """Rolling timing figures for the most recent utterances (shown in /healthz)."""
+
+    def __init__(self, size: int = 100) -> None:
+        self._recent: deque[Timing] = deque(maxlen=size)
+
+    def add(self, timing: Timing) -> None:
+        self._recent.append(timing)
+
+    def summary(self) -> dict:
+        if not self._recent:
+            return {"utterances": 0}
+        audio = sum(t.audio for t in self._recent)
+        work = sum(t.work for t in self._recent)
+        waits = [t.wait for t in self._recent]
+        return {
+            "utterances": len(self._recent),
+            "audio_seconds": round(audio, 1),
+            # How many seconds of speech one second of model time handles; below 1 can't keep up.
+            "speed_x_realtime": round(audio / work, 1) if work else None,
+            "avg_wait_seconds": round(sum(waits) / len(waits), 2),
+            "max_wait_seconds": round(max(waits), 2),
+        }
 
 
 class QueueFull(Exception):
@@ -42,6 +81,8 @@ class Pipeline:
         self._task: asyncio.Task | None = None
         self.processed = 0
         self.dropped_empty = 0
+        self.stats = Stats()
+        self._last_backlog_warning = float("-inf")
 
     @property
     def queued(self) -> int:
@@ -77,9 +118,34 @@ class Pipeline:
                 self._queue.task_done()
 
     async def _handle(self, u: Utterance) -> None:
+        started = time.monotonic()
+        wait = started - u.queued_at
         # The model call blocks for a second or two; keep the HTTP server responsive meanwhile.
         text = await asyncio.to_thread(self._transcriber.transcribe, u.wav)
+        work = time.monotonic() - started
         self.processed += 1
+        self.stats.add(Timing(audio=u.duration, wait=wait, work=work))
+        log.info(
+            "Transcribed %.1f s from %s in %.2f s (%.1fx real time), waited %.1f s, %d queued: %s",
+            u.duration,
+            u.speaker,
+            work,
+            u.duration / work if work > 0 else float("inf"),
+            wait,
+            self.queued,
+            f"{len(text)} chars" if text else "nothing kept",
+        )
+        if (
+            wait > BACKLOG_WARN_SECONDS
+            and started - self._last_backlog_warning > _BACKLOG_WARN_INTERVAL
+        ):
+            self._last_backlog_warning = started
+            log.warning(
+                "Transcription is falling behind: a clip waited %.1f s with %d still queued. "
+                "Consider STT_BEAM_SIZE=1 or STT_COMPUTE_TYPE=int8_float16.",
+                wait,
+                self.queued,
+            )
         if not text:
             self.dropped_empty += 1
             return

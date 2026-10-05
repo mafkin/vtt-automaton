@@ -103,7 +103,7 @@ VTT_CLIENT_TOKENS=$ALL_TOKENS
 VTT_CORS_ORIGINS=$ORIGIN
 VTT_LLM_PROVIDER=gemini
 VTT_GEMINI_API_KEY=$GEMINI_KEY
-VTT_GEMINI_MODEL=$(env_get VTT_GEMINI_MODEL "$BACKEND_ENV" | grep . || echo gemini-2.5-flash)
+VTT_GEMINI_MODEL=$(env_get VTT_GEMINI_MODEL "$BACKEND_ENV" | grep . || echo gemini-3.8-flash)
 VTT_ANSWER_LANGUAGE=Finnish
 VTT_MAX_RULING_CHARS=3000
 VTT_WAKE_WORDS=$(env_get VTT_WAKE_WORDS "$BACKEND_ENV" | grep . || echo Nethys)
@@ -124,6 +124,7 @@ STT_MODEL=$(env_get STT_MODEL "$STT_ENV" | grep . || echo large-v3)
 STT_DEVICE=$(env_get STT_DEVICE "$STT_ENV" | grep . || echo auto)
 STT_COMPUTE_TYPE=$(env_get STT_COMPUTE_TYPE "$STT_ENV" | grep . || echo default)
 STT_LANGUAGE=fi
+STT_BEAM_SIZE=$(env_get STT_BEAM_SIZE "$STT_ENV" | grep . || echo 5)
 STT_PROMPT_TERMS=$(env_get STT_PROMPT_TERMS "$STT_ENV" | grep . || echo "Nethys,Pathfinder,Strike,Stride,Step,Trip,Grapple,Shove,Demoralize,Reactive Strike,Shield Block,off-guard,prone,frightened,flanking,hit points,AC,DC")
 ENV
 fi

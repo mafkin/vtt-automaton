@@ -23,7 +23,7 @@ class Settings(BaseSettings):
 
     llm_provider: Literal["gemini", "fake"] = "gemini"
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
 
     # Language used for interpretations and recaps. Rules text is always quoted in English.
     answer_language: str = "Finnish"

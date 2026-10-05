@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import pytest
 
@@ -100,3 +101,19 @@ async def test_no_ruling_without_foundry_client(store, llm):
     assert service.handle_segment(seg) is None
     await drain()
     assert hub.sent == [] and llm.calls == []
+
+
+async def test_ruling_and_end_to_end_times_are_logged(store, llm, caplog):
+    service = make_service(store, llm, FakeHub())
+    with caplog.at_level("INFO"):
+        ruling_id = service.handle_segment(
+            TranscriptSegment(speaker="Aino", text="Nethys, mitä Trip tekee?", t=time.time() - 2)
+        )
+        await drain()
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(m.startswith(f"Spoken question {ruling_id} from Aino") for m in messages)
+    assert any(
+        m.startswith(f"Ruling {ruling_id} took") and "confidence high" in m for m in messages
+    )
+    done = next(m for m in messages if "answered" in m)
+    assert float(done.split("answered ")[1].split(" s")[0]) >= 2.0

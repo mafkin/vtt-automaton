@@ -76,7 +76,10 @@ class VoiceRulesService:
         self._last_asked[key] = t
 
         ruling_id = f"voice-{uuid.uuid4().hex[:12]}"
-        task = asyncio.create_task(self._run(ruling_id, segment.speaker, request, context))
+        log.info("Spoken question %s from %s: %r", ruling_id, segment.speaker, request.query)
+        task = asyncio.create_task(
+            self._run(ruling_id, segment.speaker, request, context, spoken_at=t)
+        )
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return ruling_id
@@ -87,7 +90,12 @@ class VoiceRulesService:
         return [line for _, line in self._recent]
 
     async def _run(
-        self, ruling_id: str, speaker: str, request: VoiceRequest, context: list[str]
+        self,
+        ruling_id: str,
+        speaker: str,
+        request: VoiceRequest,
+        context: list[str],
+        spoken_at: float,
     ) -> None:
         meta = {"origin": "voice", "speaker": speaker, "query": request.query, "mode": request.mode}
         await self._hub.broadcast({"type": "ruling.pending", "id": ruling_id, **meta})
@@ -100,3 +108,9 @@ class VoiceRulesService:
         )
         reply = await run_ruling(self._rules, self._language, ruling_request, ruling_id)
         await self._hub.broadcast({**reply, **meta})
+        # End to end: from the end of the sentence (speech-to-text included) to the Foundry card.
+        log.info(
+            "Spoken question %s answered %.1f s after the speaker finished",
+            ruling_id,
+            time.time() - spoken_at,
+        )

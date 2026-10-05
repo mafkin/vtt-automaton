@@ -322,6 +322,22 @@ private reply: "Hahmosi on nyt **Valeros**…".
    ```
 
 6. `/session status` shows the speakers, the utterances sent, and *rows transcribed* > 0.
+7. Check transcription speed. Each clip logs one line:
+
+   ```bash
+   docker compose logs --since 5m stt-worker | grep "Transcribed"
+   # Transcribed 4.2 s from Aino in 0.61 s (6.9x real time), waited 0.0 s, 0 queued: 57 chars
+   ```
+
+   The rolling figures for the last 100 clips:
+
+   ```bash
+   docker compose exec stt-worker python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8770/healthz').read().decode())"
+   ```
+
+   What to look for: `speed_x_realtime` should stay well above 1 (several people talking means
+   several times real-time is needed), and `waited` / `max_wait_seconds` should stay near 0. A
+   wait of several seconds means spoken questions get answered late; see C3.
 
 This is the first real test of receiving encrypted (DAVE) Discord audio. If utterances stay at
 0, see C4.
@@ -336,6 +352,19 @@ ruling. Also try:
 - **Secret:** "Nethys, salaa: näkeekö vartija minut?". Only the GM sees the card.
 
 If nothing appears, check the transcript (B19) for how "Nethys" was spelled and see C5.
+
+Measure the delay, which is the number to report:
+
+```bash
+docker compose logs --since 10m backend | grep -E "Spoken question|Ruling voice-"
+# Spoken question voice-1a2b3c from Aino: 'mitä Trip tekee?'
+# Ruling voice-1a2b3c took 1.8 s: 2 rules cited, confidence high
+# Spoken question voice-1a2b3c answered 4.6 s after the speaker finished
+```
+
+The *answered … after the speaker finished* figure covers everything: Discord's pause
+detection, the queue, Whisper, and the ruling. Subtract the *Ruling … took* figure to see how
+much was speech-to-text.
 
 **B18. Opt-out**
 
@@ -430,7 +459,7 @@ was said, or have each player check their own lines.
 |---|---|
 | `stt-worker` won't start: *could not select device driver "nvidia"* | The NVIDIA Container Toolkit is missing or Docker wasn't restarted (A3). |
 | Out of GPU memory | Set `STT_COMPUTE_TYPE=int8_float16` in `stt-worker/.env` (less VRAM, nearly the same quality), or `STT_MODEL=medium` (noticeably worse Finnish). Then `docker compose up -d stt-worker`. |
-| Very slow (transcripts lag minutes behind) | Check `docker compose logs stt-worker \| grep "Loading Whisper model"`: if it says `cpu`, the GPU isn't used. With several people talking at once the queue grows. To see the queue length: `docker compose exec stt-worker python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8770/healthz').read().decode())"` |
+| Transcription falls behind (log says *"Transcription is falling behind"*, or `waited` grows) | First check `docker compose logs stt-worker \| grep "Loading Whisper model"`: if it says `cpu`, the GPU isn't used (A3). Otherwise, in `stt-worker/.env`, try in this order: `STT_BEAM_SIZE=1` (roughly twice as fast, slightly less accurate), then `STT_COMPUTE_TYPE=int8_float16`. Apply with `docker compose up -d stt-worker` and compare the *x real time* figures and the B21 accuracy before and after. |
 | Names or game terms are misspelled | Add them to `STT_PROMPT_TERMS` in `stt-worker/.env` (comma separated: characters, NPCs, places), then `docker compose up -d stt-worker`. |
 | Lines like "Kiitos katsomisesta" in transcripts | A hallucination that slipped through the filter. Note the exact text; the filter list in `stt-worker/app/transcriber.py` can be extended. |
 
