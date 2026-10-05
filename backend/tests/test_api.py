@@ -22,7 +22,11 @@ def respond(system, prompt, schema):
 @pytest.fixture
 def client(rules_db):
     settings = Settings(
-        rules_db_path=rules_db, client_tokens=[TOKEN], llm_provider="fake", rules_refresh_hours=0
+        rules_db_path=rules_db,
+        sessions_db_path=rules_db.parent / "sessions.db",
+        client_tokens=[TOKEN],
+        llm_provider="fake",
+        rules_refresh_hours=0,
     )
     return TestClient(create_app(settings, llm=FakeProvider(respond)))
 
@@ -55,8 +59,11 @@ def test_healthz_is_public(client):
 
 
 def test_app_refuses_to_start_without_tokens(rules_db):
+    settings = Settings(
+        rules_db_path=rules_db, sessions_db_path=rules_db.parent / "s.db", client_tokens=[]
+    )
     with pytest.raises(RuntimeError):
-        create_app(Settings(rules_db_path=rules_db, client_tokens=[]), llm=FakeProvider(respond))
+        create_app(settings, llm=FakeProvider(respond))
 
 
 def test_ruling_without_render_returns_data_only(client):

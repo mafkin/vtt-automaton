@@ -14,6 +14,7 @@ ORIGIN = "https://world.example"
 def client(rules_db):
     settings = Settings(
         rules_db_path=rules_db,
+        sessions_db_path=rules_db.parent / "sessions.db",
         client_tokens=[TOKEN],
         cors_origins=[ORIGIN],
         llm_provider="fake",
@@ -93,4 +94,4 @@ def test_segment_without_wake_word(client):
         json={"speaker": "Aino", "text": "Hyökkään örkkiä."},
         headers={"Authorization": f"Bearer {TOKEN}"},
     )
-    assert r.json() == {"ruling_id": None}
+    assert r.json() == {"ruling_id": None, "stored": False}

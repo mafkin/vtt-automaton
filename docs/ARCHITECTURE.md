@@ -137,27 +137,41 @@ pf2e system version it was built from. This avoids the original plan's risk of t
   start and end, round changes) on a single clock. This combined timeline is what makes useful
   recaps possible.
 
-### 3.6 Transcription pipeline
-1. **Capture.** The Discord bot joins the voice channel and receives a **separate Opus stream per
-   user**. This gives speaker labels without a diarization model.
-2. **Ingest.** The bot cuts audio into chunks of about 10–30 s at silence boundaries and uploads
-   them with `(session_id, discord_user_id, t_start)`. Raw audio goes to the audio store.
-3. **Transcribe.** A GPU worker on the home server runs `faster-whisper` and takes chunk jobs
-   from Redis. **Finnish with English game terms** is the hard case:
-   - Force `language="fi"` (auto-detect flips between fi/en on short chunks).
-   - Pass an `initial_prompt` / hotword list per campaign: PC and NPC names, place names and the
-     English PF2e terms the table uses (Strike, off-guard, Trip, Shield Block…).
-   - Start with `large-v3` (not `turbo`, which is weaker on lower-resource languages) and compare
-     it with Finnish fine-tuned Whisper checkpoints on a **hand-corrected 10–15 min sample of a
-     real session** (measure WER) before committing.
-   - A cleanup pass after the session (LLM, with the campaign glossary) fixes misheard names
-     before summarizing; the raw transcript is kept alongside.
-4. **Live view** (optional). Segments are pushed over the WebSocket as they finish (a "captions"
-   panel in Foundry).
-5. **Retention.** Audio is deleted N days after the recap is approved. The transcript is kept.
+### 3.6 Transcription pipeline (built)
+```
+Discord voice ─▶ discord-bot ──WAV per utterance──▶ stt-worker (GPU) ──text──▶ backend
+                 (Node)          POST /v1/utterances  faster-whisper   POST /api/v1/transcript/segments
+                                                                        ├─ stored in sessions.db
+                                                                        └─ "Nethys, …" → Foundry
+```
+1. **Capture** (`discord-bot/src/recorder.ts`). The bot joins undeafened and gets a **separate
+   Opus stream per user** from `@discordjs/voice` 0.19 (DAVE end-to-end encryption is handled by
+   `@snazzah/davey`). This gives speaker labels without a diarization model.
+2. **Cut.** Each stream ends after 800 ms of silence (Discord's own speaking detection). The Opus
+   is decoded to 48 kHz PCM, mixed to mono and sent as a WAV clip with
+   `(session_id, speaker, speaker_id, character, t_start)`. Speech longer than 30 s is sent in
+   30 s pieces; clips under 0.4 s (coughs, clicks) are dropped. **No audio is stored** anywhere:
+   clips exist only in memory until transcribed.
+3. **Transcribe** (`stt-worker/`). One `faster-whisper` model on the GPU, fed by an in-memory
+   queue. **Finnish with English game terms** is the hard case:
+   - `language="fi"` is forced (auto-detect flips between fi/en on short clips).
+   - An `initial_prompt` lists the table's vocabulary (`STT_PROMPT_TERMS`: wake word, character
+     and place names, English PF2e terms).
+   - `large-v3` by default (not `turbo`, which is weaker on lower-resource languages). Compare it
+     with Finnish fine-tuned checkpoints on a **hand-corrected 10–15 min sample of a real
+     session** before settling.
+   - Whisper hallucinations are dropped: subtitle credits ("Kiitos katsomisesta",
+     "Tekstitys: …"), echoes of the prompt on noise (seen in testing), and pieces with high
+     no-speech probability and low confidence.
+4. **Store and react** (backend). Segments are stored per session in `data/sessions.db` (late
+   segments after `/session stop` are kept) and go through the voice-ruling detector (§4.3).
+5. **Transcript.** On `/session stop` the bot posts the transcript as a text file in the channel
+   (`[h:mm:ss] Speaker (Character): text`); `/session transcript` posts the latest again.
+   API: `GET /api/v1/sessions/{id}/transcript?format=text`.
 
-**Consent:** the bot announces that it is recording when it joins, and posts a pinned notice.
-Players can opt out per campaign, and their audio is then dropped at capture.
+**Consent:** `/session start` posts a notice that recording started, that no audio is stored, and
+how to opt out. `/optout` takes effect immediately; that user's audio is never subscribed to.
+Recording stops by itself when the voice channel has been empty for 5 minutes.
 
 ### 3.7 Recap worker
 Recaps are written in Finnish. After a session stops, the worker splits the timeline into scenes or encounters and summarizes each
@@ -209,14 +223,19 @@ directly.) Keeping the adapter swappable makes it easy to compare models on the 
   Molten installs it from the manifest URL.
 - Later: `GameEvent`s (rolls, combat) for the session timeline, `@UUID` links, `/npc`.
 
-### 4.2 Discord bot (`discord-bot/`, TypeScript, discord.js + @discordjs/voice)
+### 4.2 Discord bot (`discord-bot/`, TypeScript, discord.js 14 + @discordjs/voice 0.19)
 - Job: **transcription only**. No rules commands; rulings live in Foundry.
-- Slash commands: `/session start|stop|status`, `/link` (map a Discord user to a Foundry actor),
-  `/optout`.
-- Voice capture as described in §3.6.
-- Written in Node because Discord's voice E2EE (DAVE) affects receiving audio, and the discord.js
-  voice stack is the most likely to keep up with it. **Verify DAVE voice *receive* with a spike
-  before building phase 4 on it.** The bot is a thin adapter, so the backend is unaffected.
+- Slash commands (registered to one server, `DISCORD_GUILD_ID`): `/session start [label]`,
+  `/session stop`, `/session status`, `/session transcript`, `/link character:<name>` (shown next
+  to the speaker in transcripts and in voice-ruling context), `/optout`, `/optin`. Replies are in
+  Finnish.
+- Intents: `Guilds` and `GuildVoiceStates` only (no privileged intents). Needs the Connect
+  permission in the voice channel.
+- Reconnects after short voice drops; posts a notice and stops if the connection is lost.
+- Character names and opt-outs are kept in `data/discord-bot/users.json`.
+- **Still to verify live:** receiving audio in a real DAVE-encrypted call. The library supports
+  it (it decrypts per user with `@snazzah/davey`), but it has only been tested with recorded
+  Opus here.
 
 ---
 
@@ -287,8 +306,8 @@ vtt-automaton/
 |-------|-----------|-----------|
 | 0 ✅ | Skeleton | Monorepo, compose, CI (lint + tests), config/secrets layout |
 | 1 ✅ | Rules core MVP | `POST /rulings` returns a validated `Ruling` from the AoN DB + Gemini; `curl` and pytest eval set pass |
-| 2 🚧 | Foundry module MVP | `/rule` and `/gmrule` work from player clients through the GM relay; pending message; voice-asked rulings via the transcript endpoint |
-| 3 | Session capture | `/session start` records per-user audio → transcripts in DB, with a speaker↔actor map; live segments feed voice rulings |
+| 2 ✅ | Foundry module MVP | `/rule` and `/gmrule` work from player clients through the GM relay; pending message; voice-asked rulings via the transcript endpoint |
+| 3 🚧 | Session capture | `/session start` records per-user audio → transcripts in DB, with a speaker↔actor map; live segments feed voice rulings |
 | 4 | Recaps | Combined timeline → recap JournalEntry, after GM review |
 | 5 | Game-state depth | Combat context in rulings, `/npc` roleplay from stat blocks, live captions |
 

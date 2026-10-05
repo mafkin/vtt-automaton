@@ -39,6 +39,35 @@ waits for the rules import, checks the public address with a test ruling, and pr
 GM enters in Foundry. Re-running it keeps existing values. To update later:
 `git pull && docker compose up -d --build`.
 
+It also offers to set up **Discord transcription** (the `transcription` compose profile: the
+Discord bot and the GPU speech-to-text worker). For that you need:
+
+- A Discord application with a bot: discord.com/developers/applications → New Application → Bot →
+  Reset Token. Invite it with OAuth2 → URL Generator, scopes `bot` + `applications.commands`,
+  permissions *View Channels*, *Send Messages*, *Attach Files*, *Connect*.
+- Your Discord server ID (Developer Mode → right-click the server → Copy Server ID).
+- An NVIDIA GPU with the driver and the
+  [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/).
+  The Whisper `large-v3` model (~3 GB) downloads on first start.
+
+## Discord transcription
+
+In Discord, join the voice channel and use:
+
+| Command | What it does |
+|---|---|
+| `/session start [label]` | Bot joins your voice channel and starts transcribing each speaker |
+| `/session stop` | Stops, and posts the transcript as a text file in the channel |
+| `/session status` | Duration, speakers, lines transcribed so far |
+| `/session transcript` | Posts the latest session's transcript again |
+| `/link character:<name>` | Your character's name, shown next to yours in the transcript |
+| `/optout`, `/optin` | Leave yourself out of recording, or back in |
+
+No audio is saved; clips live in memory only until transcribed. Saying "Nethys, …" during a
+session asks the rules arbiter, and the ruling appears in Foundry.
+
+Tests: `cd discord-bot && npm ci && npm test`, `cd stt-worker && uv run pytest`.
+
 ## Foundry module
 
 `foundry-module/pf2e-ai-arbiter`. Install on Molten from the manifest URL

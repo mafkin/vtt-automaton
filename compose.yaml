@@ -1,12 +1,15 @@
-# Home-server deployment. Later phases add: discord-bot (Node), stt-worker (GPU), redis.
+# Home-server deployment.
+# The "transcription" profile adds the Discord bot and the GPU speech-to-text worker; enable it
+# with COMPOSE_PROFILES=transcription in .env (scripts/setup-server.sh does this).
 services:
   backend:
     build: ./backend
     env_file: ./backend/.env
     environment:
       VTT_RULES_DB_PATH: /data/pf2e_remaster.db
+      VTT_SESSIONS_DB_PATH: /data/sessions.db
     volumes:
-      # Read-write: the backend refreshes the rules DB from Archives of Nethys in place.
+      # Read-write: the backend refreshes the rules DB and stores session transcripts here.
       - ./data:/data
     # Localhost only, for curl testing on the server. Public access goes through cloudflared.
     ports:
@@ -23,3 +26,41 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+  stt-worker:
+    profiles: [transcription]
+    build: ./stt-worker
+    env_file: ./stt-worker/.env
+    environment:
+      STT_BACKEND_URL: http://backend:8765
+    volumes:
+      - whisper-models:/models # model download (~3 GB for large-v3) survives rebuilds
+    # Needs the NVIDIA driver and NVIDIA Container Toolkit on the host.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  discord-bot:
+    profiles: [transcription]
+    build: ./discord-bot
+    env_file: ./discord-bot/.env
+    environment:
+      BACKEND_URL: http://backend:8765
+      STT_URL: http://stt-worker:8770
+      DATA_DIR: /data
+    volumes:
+      - ./data/discord-bot:/data
+    depends_on:
+      - backend
+      - stt-worker
+    restart: unless-stopped
+
+volumes:
+  whisper-models:

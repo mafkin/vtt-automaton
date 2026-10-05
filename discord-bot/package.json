@@ -1,0 +1,25 @@
+{
+  "name": "vtt-automaton-discord-bot",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Records a Discord voice channel per speaker for VTT Automaton session transcription",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/index.js",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@discordjs/voice": "^0.19.2",
+    "discord.js": "^14.27.0",
+    "opusscript": "^0.0.8",
+    "prism-media": "^1.3.5"
+  }
+}

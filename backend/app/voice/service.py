@@ -22,6 +22,15 @@ class TranscriptSegment(BaseModel):
     text: str = Field(max_length=4000)
     # Unix time the speech ended; defaults to when the segment is received.
     t: float | None = None
+    # Set by the transcription pipeline; a hand-sent test segment can leave them out.
+    session_id: str | None = Field(default=None, max_length=64)
+    speaker_id: str | None = Field(default=None, max_length=64)
+    character: str | None = Field(default=None, max_length=100)
+    t_start: float | None = None
+
+    @property
+    def label(self) -> str:
+        return f"{self.speaker} ({self.character})" if self.character else self.speaker
 
 
 class VoiceRulesService:
@@ -51,7 +60,7 @@ class VoiceRulesService:
         """
         t = segment.t if segment.t is not None else time.time()
         context = self._context_before(t)
-        self._recent.append((t, f"{segment.speaker}: {segment.text.strip()}"))
+        self._recent.append((t, f"{segment.label}: {segment.text.strip()}"))
 
         request = self._detector.feed(segment.speaker, segment.text, t)
         if request is None:
