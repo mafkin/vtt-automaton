@@ -1,7 +1,8 @@
 # vtt-automaton
 
 Pathfinder 2e rules assistant for Foundry VTT and session transcription via a Discord bot, backed by
-a single service. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+a single service. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and
+**[docs/SETUP.md](docs/SETUP.md) for server setup and the end-to-end test plan**.
 
 ## Backend (phase 1: rules)
 
