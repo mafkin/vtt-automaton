@@ -124,6 +124,7 @@ STT_MODEL=$(env_get STT_MODEL "$STT_ENV" | grep . || echo large-v3)
 STT_DEVICE=$(env_get STT_DEVICE "$STT_ENV" | grep . || echo auto)
 STT_COMPUTE_TYPE=$(env_get STT_COMPUTE_TYPE "$STT_ENV" | grep . || echo default)
 STT_LANGUAGE=fi
+STT_BEAM_SIZE=$(env_get STT_BEAM_SIZE "$STT_ENV" | grep . || echo 5)
 STT_PROMPT_TERMS=$(env_get STT_PROMPT_TERMS "$STT_ENV" | grep . || echo "Nethys,Pathfinder,Strike,Stride,Step,Trip,Grapple,Shove,Demoralize,Reactive Strike,Shield Block,off-guard,prone,frightened,flanking,hit points,AC,DC")
 ENV
 fi

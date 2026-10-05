@@ -72,7 +72,12 @@ def create_app(
     @app.get("/healthz")
     async def healthz(request: Request) -> dict:
         pipeline: Pipeline = request.app.state.pipeline
-        return {"status": "ok", "queued": pipeline.queued, "processed": pipeline.processed}
+        return {
+            "status": "ok",
+            "queued": pipeline.queued,
+            "processed": pipeline.processed,
+            "recent": pipeline.stats.summary(),
+        }
 
     @app.post(
         "/v1/utterances",
