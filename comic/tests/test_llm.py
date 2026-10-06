@@ -282,7 +282,8 @@ def test_sheet_prompt_keeps_the_natural_stance():
     bible = campaign()
     p = sheet_prompt(bible.characters[1], bible)
     assert "standing in a neutral pose" not in p
-    assert "natural resting stance" in p and "don't stretch or stand it up" in p
+    assert "natural stance" in p and "short legs" in p and "don't stretch or slim it" in p
+    assert "flippers" not in p  # an example must not describe a real character wrongly
 
 
 def test_detail_sheet_keeps_the_number_of_parts():
@@ -294,7 +295,8 @@ def test_detail_sheet_keeps_the_number_of_parts():
 def test_script_writer_names_items_exactly_and_keeps_bodies():
     p = script_prompt("events", [Moment(title="x")], campaign())
     assert 'never by a generic or different word ("weapon", "sword"' in p
-    assert "keep the heights given" in p
+    assert "posture (on two feet or on all fours), build and proportions" in p
+    assert "the heights given" in p
 
 
 def test_look_check_checks_sizes_only_with_two_heights():
