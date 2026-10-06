@@ -1,8 +1,10 @@
 import json
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from app import api
 from app.api import app
 
 
@@ -141,3 +143,34 @@ def test_dashboard_page_renders(client):
     assert r.status_code == 200
     for fragment in ("/api/v1/dashboard/mode", "/api/v1/dashboard/picker"):
         assert fragment in r.text
+
+
+def test_containers_show_only_this_stack(client, monkeypatch):
+    def container(name, project, state):
+        labels = {"com.docker.compose.project": project} if project else {}
+        return {"Names": [f"/{name}"], "State": state, "Labels": labels}
+
+    seen = {}
+
+    def proxy(request: httpx.Request) -> httpx.Response:
+        seen["query"] = dict(request.url.params)
+        return httpx.Response(
+            200,
+            json=[
+                container("vtt-stt-worker", "vtt-automaton", "running"),
+                container("vtt-comfyui", "vtt-automaton", "exited"),
+                container("ifc-checker-app-1", "ifc-checker", "running"),
+                container("some-standalone", None, "running"),
+            ],
+        )
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        api.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(proxy), **kw)
+    )
+    html = client.get("/api/v1/dashboard/containers").text
+    assert "vtt-stt-worker" in html and "vtt-comfyui" in html
+    assert "ifc-checker" not in html and "some-standalone" not in html
+    # Stopped containers are listed too: ComfyUI is normally stopped between comics.
+    assert seen["query"] == {"all": "true"}
+    assert "starts for comics" in html

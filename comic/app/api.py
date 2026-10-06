@@ -34,6 +34,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="VTT Comic API", lifespan=lifespan)
 templates = Jinja2Templates(directory="app/templates")
 
+COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
+
 # Transcript lines shown when picking a session.
 PREVIEW_LINES = 10
 
@@ -47,16 +49,26 @@ async def dashboard(request: Request):
 async def get_containers() -> str:
     try:
         async with httpx.AsyncClient() as client:
-            r = await client.get(f"{settings.docker_proxy_url}/containers/json", timeout=10.0)
+            # all=true: ComfyUI is stopped between comics and should still be listed.
+            r = await client.get(
+                f"{settings.docker_proxy_url}/containers/json",
+                params={"all": "true"},
+                timeout=10.0,
+            )
             r.raise_for_status()
             containers = r.json()
     except (httpx.HTTPError, ValueError) as exc:
         return f"<p class='text-red-500'>Error loading containers: {escape(str(exc))}</p>"
     items = []
     for c in containers:
+        # The proxy sees every container on the host; show only this compose project.
+        if (c.get("Labels") or {}).get(COMPOSE_PROJECT_LABEL) != settings.compose_project:
+            continue
         name = escape(c["Names"][0].lstrip("/"))
         state = escape(c["State"])
         color = "text-green-400" if c["State"] == "running" else "text-red-400"
+        if name == settings.comfyui_container_name and c["State"] != "running":
+            state, color = f"{state} – starts for comics", "text-slate-400"
         items.append(
             "<li class='flex justify-between border-b border-slate-700 pb-2'>"
             f"<span>{name}</span><span class='{color}'>{state}</span></li>"

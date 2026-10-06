@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     # to start a session (no transcription) while it is there.
     lock_path: str = "/data/comic.lock"
 
+    # Compose project whose containers the dashboard lists (compose.yaml: name).
+    compose_project: str = "vtt-automaton"
+
     sessions_db_path: str = "/data/sessions.db"
     comfy_output_dir: str = "/comfy_output"
     jobs_dir: str = "/data/jobs"

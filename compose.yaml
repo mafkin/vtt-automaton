@@ -2,6 +2,11 @@
 # Profiles (COMPOSE_PROFILES in .env; scripts/setup-server.sh keeps it up to date):
 #   transcription: the Discord bot and the GPU speech-to-text worker
 #   comic:         comic generation from session transcripts (ComfyUI on the same GPU)
+
+# Fixed project name, whatever the checkout folder is called: container names and the
+# dashboard's container list (comic/app/config.py: compose_project) depend on it.
+name: vtt-automaton
+
 services:
   backend:
     build: ./backend

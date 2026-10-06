@@ -33,3 +33,6 @@ jobs:
           grep -qF "(vtt-stt-worker|vtt-comfyui)/(start|stop)" resolved.yaml
           grep -q 'stt_container_name: str = "vtt-stt-worker"' comic/app/config.py
           grep -q 'comfyui_container_name: str = "vtt-comfyui"' comic/app/config.py
+          # The dashboard lists containers of this compose project only.
+          grep -q "^name: vtt-automaton$" resolved.yaml
+          grep -q 'compose_project: str = "vtt-automaton"' comic/app/config.py
