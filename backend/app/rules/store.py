@@ -12,7 +12,7 @@ from pathlib import Path
 from app.rules.models import RuleEntry
 
 # Bump when the schema or the text conversion changes; the importer rebuilds older DBs.
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS entries (
@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS entries (
     aon_url   TEXT NOT NULL,
     traits    TEXT NOT NULL DEFAULT '[]',-- JSON array of trait names
     text      TEXT NOT NULL,             -- verbatim rules text, plain text
-    markdown  TEXT,                      -- original AoN markdown (links, layout)
     source    TEXT,                      -- book and page
     legacy    INTEGER NOT NULL DEFAULT 0 -- 1 = only in pre-Remaster books; hidden from rulings
 );
@@ -40,6 +39,29 @@ CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
 
 # Column weights for bm25: matches in the name count far more than matches in body text.
 _BM25_WEIGHTS = (10.0, 3.0, 1.0)
+
+# Categories that hold rules. Full-text matches in these rank ahead of items, creatures and
+# hazards, which mention game terms constantly ("…the target falls prone…") without defining them.
+RULE_CATEGORIES = frozenset(
+    {
+        "action",
+        "condition",
+        "rules",
+        "trait",
+        "spell",
+        "skill",
+        "skill-general-action",
+        "creature-ability",
+        "class-feature",
+        "feat",
+        "sidebar",
+        "ritual",
+        "curse",
+        "disease",
+    }
+)
+# Full-text candidates fetched per result slot before re-ranking by category.
+_FTS_OVERFETCH = 4
 _FTS_SQL = """
 SELECT e.* FROM entries_fts f JOIN entries e ON e.rowid = f.rowid
 WHERE entries_fts MATCH ? AND e.legacy = 0
@@ -95,7 +117,10 @@ class RulesStore:
         return _row_to_entry(row) if row else None
 
     def search(self, terms: list[str], limit: int = 8) -> list[RuleEntry]:
-        """Exact name matches first, then full-text matches ranked by bm25. Skips legacy entries."""
+        """Exact name matches first, then full-text matches (rule categories first, by bm25).
+
+        Legacy entries are skipped.
+        """
         terms = [t.strip() for t in terms if t.strip()]
         if not terms:
             return []
@@ -113,8 +138,10 @@ class RulesStore:
             if query and len(results) < limit:
                 rows = conn.execute(
                     _FTS_SQL,
-                    (query, *_BM25_WEIGHTS, limit),
-                )
+                    (query, *_BM25_WEIGHTS, limit * _FTS_OVERFETCH),
+                ).fetchall()
+                # Stable sort: rule categories first, bm25 order kept within each group.
+                rows.sort(key=lambda row: row["category"] not in RULE_CATEGORIES)
                 for row in rows:
                     results.setdefault(row["id"], _row_to_entry(row))
 

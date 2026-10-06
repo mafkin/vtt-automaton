@@ -5,8 +5,8 @@ import { test } from "node:test";
 import type { UtteranceMeta } from "../src/clients.js";
 import { Recorder } from "../src/recorder.js";
 
-// 48 kHz stereo s16le: 192 000 bytes per second.
-const STEREO_SECOND = 192_000;
+// The decoder outputs 48 kHz mono s16le: 96 000 bytes per second.
+const SECOND = 96_000;
 
 class FakeReceiver {
   speaking = new EventEmitter();
@@ -30,7 +30,7 @@ function setup(options: Partial<ConstructorParameters<typeof Recorder>[0]> = {})
     speakerInfo: async (userId) => ({ speaker: `user-${userId}`, character: userId === "1" ? "Valeros" : undefined }),
     isOptedOut: (userId) => optedOut.has(userId),
     ignoreUserIds: new Set(["bot"]),
-    decoder: () => new PassThrough(), // the fake "opus" is already PCM
+    decoder: () => new PassThrough(), // the fake "opus" is already mono PCM
     now: () => clock,
     log: () => {},
     ...options,
@@ -46,8 +46,8 @@ test("one utterance per speaker turn, as mono WAV with speaker details", async (
   const { receiver, sent, recorder } = setup();
   receiver.speaking.emit("start", "1");
   const stream = receiver.streams.get("1")!;
-  stream.push(Buffer.alloc(STEREO_SECOND));
-  stream.push(Buffer.alloc(STEREO_SECOND / 2));
+  stream.push(Buffer.alloc(SECOND));
+  stream.push(Buffer.alloc(SECOND / 2));
   stream.push(null); // Discord ends the stream after the silence timeout
   await settle();
 
@@ -63,7 +63,7 @@ test("long speech is sent in pieces with advancing start times", async () => {
   const { receiver, sent } = setup({ maxSeconds: 1 });
   receiver.speaking.emit("start", "2");
   const stream = receiver.streams.get("2")!;
-  stream.push(Buffer.alloc(STEREO_SECOND * 2.5));
+  stream.push(Buffer.alloc(SECOND * 2.5));
   stream.push(null);
   await settle();
   assert.deepEqual(sent.map((s) => s.meta.tStart), [1000, 1001, 1002]);
@@ -78,7 +78,7 @@ test("short clips, the bot itself and opted-out users are not sent", async () =>
   assert.equal(receiver.streams.size, 0);
 
   receiver.speaking.emit("start", "4");
-  receiver.streams.get("4")!.push(Buffer.alloc(STEREO_SECOND * 0.2)); // a cough
+  receiver.streams.get("4")!.push(Buffer.alloc(SECOND * 0.2)); // a cough
   receiver.streams.get("4")!.push(null);
   await settle();
   assert.equal(sent.length, 0);
@@ -95,7 +95,7 @@ test("a repeated speaking event while already listening does not resubscribe", (
 test("stop() flushes speech in progress and waits for uploads", async () => {
   const { receiver, sent, recorder } = setup();
   receiver.speaking.emit("start", "1");
-  receiver.streams.get("1")!.push(Buffer.alloc(STEREO_SECOND));
+  receiver.streams.get("1")!.push(Buffer.alloc(SECOND));
   await settle();
   await recorder.stop();
   await settle();
@@ -111,7 +111,7 @@ test("a failing upload is logged, not thrown", async () => {
     log: (m) => logs.push(m),
   });
   receiver.speaking.emit("start", "1");
-  receiver.streams.get("1")!.push(Buffer.alloc(STEREO_SECOND));
+  receiver.streams.get("1")!.push(Buffer.alloc(SECOND));
   receiver.streams.get("1")!.push(null);
   await settle();
   assert.match(logs[0] ?? "", /worker down/);
@@ -136,4 +136,9 @@ test("real Opus packets are decoded (opusscript) into the expected amount of aud
   await settle();
   assert.equal(sent.length, 1);
   assert.equal(sent[0]!.wav.length - 44, 96_000); // 1 s of 48 kHz mono s16le
+  // The signal survives the stereo → mono decode (not silence).
+  const pcm = sent[0]!.wav.subarray(44);
+  let peak = 0;
+  for (let i = 0; i < pcm.length; i += 2) peak = Math.max(peak, Math.abs(pcm.readInt16LE(i)));
+  assert.ok(peak > 2000, `peak ${peak}`);
 });

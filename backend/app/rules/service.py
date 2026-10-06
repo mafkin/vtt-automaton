@@ -126,13 +126,20 @@ def fit_to_budget(refs: list[RuleRef], budget: int) -> list[RuleRef]:
     return fitted
 
 
+# Longer entries (whole classes run to 15,000+ characters) are cut in the prompt. Quotes still
+# verify against the full text, and a cut entry is a verbatim prefix of it.
+PROMPT_CHARS_PER_ENTRY = 4000
+
+
 def _format_entries(entries: list[RuleEntry]) -> str:
     blocks = []
     for e in entries:
+        text = e.text
+        if len(text) > PROMPT_CHARS_PER_ENTRY:
+            text = _truncate(text, PROMPT_CHARS_PER_ENTRY) + "\n[…]"
         traits = f" [{', '.join(e.traits)}]" if e.traits else ""
         blocks.append(
-            f'<entry id="{e.id}" category="{e.category}" name="{e.name}"{traits}>\n'
-            f"{e.text}\n</entry>"
+            f'<entry id="{e.id}" category="{e.category}" name="{e.name}"{traits}>\n{text}\n</entry>'
         )
     return "\n\n".join(blocks)
 
@@ -200,8 +207,9 @@ class RulesService:
 
     async def _analyse(self, query: str) -> QueryAnalysis:
         try:
+            # A lookup, not reasoning: ask for the model's quickest mode.
             analysis = await self._llm.generate_json(
-                system=ANALYSIS_SYSTEM, prompt=query, schema=QueryAnalysis
+                system=ANALYSIS_SYSTEM, prompt=query, schema=QueryAnalysis, fast=True
             )
             if analysis.search_terms:
                 return analysis

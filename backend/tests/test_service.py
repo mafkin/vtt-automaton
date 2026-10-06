@@ -167,3 +167,24 @@ async def test_duplicate_citations_of_one_entry_are_merged(store):
     )
     ruling = await RulesService(store, scripted(ANALYSIS, draft)).rule(RulingRequest(query="q"))
     assert [r.quote for r in ruling.raw] == ["lands prone."]
+
+
+def test_long_entries_are_cut_in_the_prompt_but_quotes_still_verify():
+    from app.rules.models import RuleEntry
+    from app.rules.service import PROMPT_CHARS_PER_ENTRY, _format_entries
+
+    long_text = "Opening rule sentence. " + "filler words " * 2000
+    entry = RuleEntry(id="class-1", category="class", name="Champion", aon_url="u", text=long_text)
+    prompt = _format_entries([entry])
+    assert len(prompt) < PROMPT_CHARS_PER_ENTRY + 200
+    assert prompt.rstrip().endswith("[…]\n</entry>".rstrip())
+    refs = RulesService.validate_citations(
+        [Citation(entry_id="class-1", quote="Opening rule sentence.")], [entry]
+    )
+    assert refs and refs[0].text == long_text  # the card still gets the full verbatim text
+
+
+async def test_query_analysis_asks_for_the_fast_mode(store):
+    llm = scripted(ANALYSIS, RuntimeError("draft fails"))
+    await RulesService(store, llm).rule(RulingRequest(query="q"))
+    assert llm.fast_calls == 1  # analysis only; the ruling itself uses the normal mode

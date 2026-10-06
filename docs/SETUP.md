@@ -210,7 +210,7 @@ docker compose logs backend | grep "Rules DB updated"
 ls -lh data/pf2e_remaster.db
 ```
 
-Expect roughly *29,000 entries (1,400 legacy)* and a ~130 MB file.
+Expect roughly *29,000 entries (1,400 legacy)* and a ~65 MB file.
 
 **B4. A ruling over HTTP**
 

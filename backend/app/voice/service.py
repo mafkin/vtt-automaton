@@ -67,6 +67,10 @@ class VoiceRulesService:
             return None
 
         key = _norm(request.query)
+        # Forget questions older than the cooldown so the map can't grow over a long uptime.
+        self._last_asked = {
+            k: asked for k, asked in self._last_asked.items() if t - asked < self._cooldown_seconds
+        }
         if t - self._last_asked.get(key, float("-inf")) < self._cooldown_seconds:
             log.info("Ignoring repeated voice question %r", request.query)
             return None
