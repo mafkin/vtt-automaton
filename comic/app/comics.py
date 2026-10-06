@@ -61,8 +61,30 @@ class ScriptPage(BaseModel):
     panels: list[ScriptPanel]
 
 
+class VersionInfo(BaseModel):
+    """What one drawing of a page was made with, for comparing versions side by side."""
+
+    round: str = ""
+    at: float = Field(default_factory=time.time)
+    # Character name -> the reference used: a sheet file name, or "image".
+    refs: dict[str, str] = Field(default_factory=dict)
+    anchor: bool = False
+    extra: str = ""
+    tokens: int = 0
+    check: str = ""
+
+
+class Round(BaseModel):
+    """One drawing round ("Draw all" or a single redraw): the last try of each page in it."""
+
+    id: str
+    label: str
+    pages: list[str | None]
+
+
 class PageState(BaseModel):
     versions: list[str] = Field(default_factory=list)
+    info: dict[str, VersionInfo] = Field(default_factory=dict)
     # Result of reading the lettering back: "ok", or what didn't match.
     check: str = ""
 
@@ -126,7 +148,7 @@ def list_comics() -> list[Comic]:
     return sorted(found, key=lambda c: c.created_at, reverse=True)
 
 
-def add_page_version(comic: Comic, index: int, png: bytes) -> str:
+def add_page_version(comic: Comic, index: int, png: bytes, info: VersionInfo | None = None) -> str:
     """Store a new drawing of page `index` (0-based); older versions are kept."""
     while len(comic.pages) <= index:
         comic.pages.append(PageState())
@@ -134,8 +156,30 @@ def add_page_version(comic: Comic, index: int, png: bytes) -> str:
     name = f"page_{index + 1}_v{len(page.versions) + 1}.png"
     write_atomic(_dir(comic.id) / name, png)
     page.versions.append(name)
+    page.info[name] = info or VersionInfo()
     save(comic)
     return name
+
+
+def _label(info: VersionInfo) -> str:
+    refs = ", ".join(f"{name}: {ref}" for name, ref in sorted(info.refs.items()))
+    return " · ".join(part for part in (refs, "style anchor" if info.anchor else "") if part)
+
+
+def rounds(comic: Comic) -> list[Round]:
+    """Drawing rounds in order, for the comparison grid (one column per round)."""
+    found: dict[str, Round] = {}
+    started: dict[str, float] = {}
+    for index, page in enumerate(comic.pages):
+        for name in page.versions:
+            info = page.info.get(name) or VersionInfo(round=name)
+            key = info.round or name
+            if key not in found:
+                found[key] = Round(id=key, label=_label(info), pages=[None] * len(comic.pages))
+                started[key] = info.at
+            found[key].pages[index] = name  # later tries in the same round replace earlier
+            started[key] = min(started[key], info.at)
+    return sorted(found.values(), key=lambda r: started[r.id])
 
 
 def page_path(comic_id: str, name: str) -> Path:

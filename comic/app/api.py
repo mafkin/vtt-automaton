@@ -9,13 +9,13 @@ from arq import create_pool
 from arq.connections import RedisSettings
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app import bible, comics
 from app.bible import BibleError
 from app.config import settings
-from app.llm import describe_character
+from app.llm import describe_character, draw_sheet
 from app.sessions import (
     ended_sessions_with_transcripts,
     get_session,
@@ -114,6 +114,7 @@ def _comic_view(request: Request, comic: comics.Comic, notice: str = "") -> HTML
         "busy": comic.status in comics.BUSY,
         "budget": comics.load_limits().token_budget_per_comic,
         "notice": notice,
+        "rounds": comics.rounds(comic),
     }
     return templates.TemplateResponse(request, "comic.html", context)
 
@@ -304,11 +305,13 @@ async def save_campaign(
     bubble_language: str = Form("Finnish"),
     style_positive: str = Form(""),
     style_negative: str = Form(""),
+    style_page_look: str = Form(""),
 ):
     b = bible.load()
     b.setting, b.tone = setting.strip(), tone.strip()
     b.bubble_language = bubble_language.strip() or "Finnish"
     b.style.positive, b.style.negative = style_positive.strip(), style_negative.strip()
+    b.style.page_look = style_page_look.strip()
     bible.save(b)
     return _bible_card(request, "Saved.")
 
@@ -337,9 +340,16 @@ async def update_character(
     name: str = Form(""),
     aliases: str = Form(""),
     appearance: str = Form(""),
+    traits: str | None = Form(None),
 ):
     with _known_character():
-        bible.update_character(character_id, name, aliases.split(","), appearance)
+        bible.update_character(
+            character_id,
+            name,
+            aliases.split(","),
+            appearance,
+            traits.splitlines() if traits is not None else None,
+        )
     return _bible_card(request, "Saved.")
 
 
@@ -384,20 +394,102 @@ async def delete_image(request: Request, character_id: str, name: str):
 
 
 @app.post("/api/v1/bible/characters/{character_id}/describe", response_class=HTMLResponse)
-async def draft_appearance(request: Request, character_id: str, appearance: str = Form("")):
-    """Let Gemini draft the appearance text from the reference images. Not saved until Save."""
+async def draft_appearance(
+    request: Request, character_id: str, appearance: str = Form(""), traits: str = Form("")
+):
+    """Let Gemini draft the appearance and must-have traits from the reference images.
+    Not saved until Save."""
     with _known_character():
         character = bible.load().character(character_id)
         images = [bible.image_path(character_id, n).read_bytes() for n in character.images]
 
-    def fragment(text: str, note: str, error: bool = False):
-        context = {"c": character, "appearance": text, "note": note, "error": error}
+    def fragment(text: str, trait_list: list[str], note: str, error: bool = False):
+        context = {
+            "c": character,
+            "appearance": text,
+            "traits": trait_list,
+            "note": note,
+            "error": error,
+        }
         return templates.TemplateResponse(request, "appearance.html", context)
 
+    current = [t for t in traits.splitlines() if t.strip()]
     if not images:
-        return fragment(appearance, "Upload reference images first.", error=True)
+        return fragment(appearance, current, "Upload reference images first.", error=True)
     try:
-        draft = await run_in_threadpool(describe_character, character.name, images, appearance)
+        draft, tokens = await run_in_threadpool(
+            describe_character, character.name, images, appearance
+        )
     except Exception as exc:  # Gemini errors vary; show them instead of a 500
-        return fragment(appearance, f"Gemini failed: {exc}", error=True)
-    return fragment(draft, "Draft from the images. Edit it, then press Save.")
+        return fragment(appearance, current, f"Gemini failed: {exc}", error=True)
+    bible.charge(tokens)
+    note = "Draft from the images. Edit it, then press Save."
+    return fragment(draft.appearance, draft.traits, note)
+
+
+@app.post("/api/v1/bible/characters/{character_id}/sheets", response_class=HTMLResponse)
+async def draw_character_sheet(request: Request, character_id: str):
+    """Draw a character sheet in the comic's style from the reference images (~30 s)."""
+    with _known_character():
+        b = bible.load()
+        character = b.character(character_id)
+        images = [bible.image_path(character_id, n).read_bytes() for n in character.images]
+    if not images:
+        return _bible_card(request, f"{character.name}: Upload reference images first.", True)
+    try:
+        png, tokens = await run_in_threadpool(draw_sheet, character, images, b)
+    except Exception as exc:  # Gemini errors vary; show them instead of a 500
+        return _bible_card(request, f"{character.name}: Gemini failed: {exc}", error=True)
+    bible.charge(tokens)
+    name = bible.add_sheet(character_id, png)
+    return _bible_card(request, f"{character.name}: drew {name}. Approve it to use it on pages.")
+
+
+@app.get("/api/v1/bible/characters/{character_id}/sheets/{name}")
+async def get_sheet(character_id: str, name: str):
+    with _known_character():
+        path = bible.sheet_path(character_id, name)
+    return FileResponse(path, media_type="image/png")
+
+
+@app.post(
+    "/api/v1/bible/characters/{character_id}/sheets/{name}/approve", response_class=HTMLResponse
+)
+async def approve_sheet(request: Request, character_id: str, name: str):
+    with _known_character():
+        bible.approve_sheet(character_id, name)
+    return _bible_card(request, f"{name} is now the reference on pages.")
+
+
+@app.post(
+    "/api/v1/bible/characters/{character_id}/sheets/{name}/delete", response_class=HTMLResponse
+)
+async def delete_sheet(request: Request, character_id: str, name: str):
+    with _known_character():
+        bible.delete_sheet(character_id, name)
+    return _bible_card(request, f"{name} deleted.")
+
+
+@app.get("/api/v1/bible/anchor")
+async def get_anchor():
+    png = bible.anchor_image()
+    if png is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No style reference")
+    return Response(png, media_type="image/png")
+
+
+@app.post("/api/v1/bible/anchor/delete", response_class=HTMLResponse)
+async def delete_anchor(request: Request):
+    bible.clear_anchor()
+    return _bible_card(request, "Style reference removed.")
+
+
+@app.post("/api/v1/comics/{comic_id}/pages/{name}/anchor", response_class=HTMLResponse)
+async def use_as_anchor(comic_id: str, name: str):
+    """Make a drawn page the style reference for every page from now on."""
+    try:
+        png = comics.page_path(comic_id, name).read_bytes()
+    except KeyError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown page") from exc
+    bible.set_anchor(png)
+    return HTMLResponse("<span class='text-green-400 font-bold'>Style reference set.</span>")

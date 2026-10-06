@@ -137,10 +137,23 @@ def write_script(events: str, moments: list[Moment], bible: Bible) -> tuple[list
     return ScriptResult.model_validate_json(response.text).pages, _tokens(response)
 
 
-def draw_prompt(page: ScriptPage, bible: Bible, cast: list[Character], extra: str = "") -> str:
-    refs = "; ".join(
-        f"Reference image {i} is {c.name.upper()}" + (f" ({c.appearance})" if c.appearance else "")
+def draw_prompt(
+    page: ScriptPage, bible: Bible, cast: list[Character], extra: str = "", anchor: bool = False
+) -> str:
+    """The page drawer's prompt. Images come in this order: one per cast member, then the style
+    anchor page if `anchor`."""
+    refs = "\n".join(
+        f"Reference image {i} is {c.name.upper()}"
+        + (f". {c.name.upper()} must have: {'; '.join(c.traits)}" if c.traits else "")
+        + (f". Look: {c.appearance}" if c.appearance else "")
         for i, c in enumerate(cast, 1)
+    )
+    style_ref = (
+        f"Reference image {len(cast) + 1} is a STYLE REFERENCE page from the same comic: match its"
+        " drawing style, colours, lettering and panel borders. Don't copy its characters, scene"
+        " or text."
+        if anchor
+        else ""
     )
     panels = "\n".join(
         f"Panel {i}: {p.visual}\n  Balloons: "
@@ -150,9 +163,11 @@ def draw_prompt(page: ScriptPage, bible: Bible, cast: list[Character], extra: st
     return f"""Draw one finished comic page with {len(page.panels)} panels, clean gutters, and the
 title "{page.title}" at the top, lettered exactly like that.
 Art style: {bible.style.positive}. Avoid: {bible.style.negative}.
+Page look: {bible.style.page_look}.
 Setting: {bible.setting}
-Characters: {refs or "(no references)"}. Keep their designs exactly as in the reference images
-and consistent in every panel.
+Characters (keep their designs exactly as in the reference images, the same in every panel):
+{refs or "(no references)"}
+{style_ref}
 Letter every speech balloon exactly as written, character for character ({bible.bubble_language}),
 in clear comic lettering with the tail pointing at the speaker. Each balloon appears once.
 No captions or narration boxes, and no other text except sound effects.
@@ -162,23 +177,26 @@ No captions or narration boxes, and no other text except sound effects.
 
 
 def draw_page(
-    page: ScriptPage, bible: Bible, cast: list[tuple[Character, bytes]], extra: str = ""
+    page: ScriptPage,
+    bible: Bible,
+    cast: list[tuple[Character, bytes]],
+    extra: str = "",
+    anchor: bytes | None = None,
 ) -> tuple[bytes, int]:
-    """One page image (PNG) from the script, steered by one reference image per character."""
-    parts = [types.Part.from_bytes(data=png, mime_type="image/png") for _, png in cast]
+    """One page image (PNG) from the script, steered by one reference image per character and
+    optionally a style anchor page."""
+    images = [png for _, png in cast] + ([anchor] if anchor else [])
+    parts = [types.Part.from_bytes(data=png, mime_type="image/png") for png in images]
     client = _client()
     response = client.models.generate_content(
         model=settings.gemini_image_model,
-        contents=[*parts, draw_prompt(page, bible, [c for c, _ in cast], extra)],
+        contents=[*parts, draw_prompt(page, bible, [c for c, _ in cast], extra, bool(anchor))],
         config=types.GenerateContentConfig(
             response_modalities=["IMAGE"],
             image_config=types.ImageConfig(aspect_ratio="3:4"),
         ),
     )
-    for part in response.candidates[0].content.parts if response.candidates else []:
-        if part.inline_data and part.inline_data.data:
-            return part.inline_data.data, _tokens(response)
-    raise RuntimeError("Gemini returned no image")
+    return _image_bytes(response), _tokens(response)
 
 
 def read_lettering(png: bytes) -> tuple[list[str], int]:
@@ -222,25 +240,66 @@ def lettering_problems(page: ScriptPage, read: list[str]) -> list[str]:
     return problems
 
 
+class CharacterDraft(BaseModel):
+    appearance: str
+    traits: list[str]
+
+
 def describe_prompt(name: str, notes: str = "") -> str:
     return (
         f"These are reference images of {name}, a character in a fantasy tabletop campaign. "
-        "Describe how they look for a text-to-image prompt: species, build, hair, face, "
-        "clothing, colours and signature items. Comma-separated phrases, at most 40 words, "
-        "no names, no story. Leave out the pose, viewpoint, background and lighting of the "
-        "images: the text is reused for every panel the character appears in."
-        + (f" Notes from the players: {notes}" if notes else "")
+        '"appearance": how they look, for an image prompt: species, build, hair, face, clothing, '
+        "colours and signature items; comma-separated phrases, at most 40 words, no names, no "
+        'story. "traits": the 3-6 details that make them recognisable at a glance and must '
+        'never change (e.g. "red headband", "spotted grey seal"). Leave out the pose, viewpoint, '
+        "background and lighting of the images: the text is reused for every page the "
+        "character appears in." + (f" Notes from the players: {notes}" if notes else "")
     )
 
 
-def describe_character(name: str, images: list[bytes], notes: str = "") -> str:
-    """Draft a short visual description of a character from their reference images."""
-    client = genai.Client(api_key=settings.gemini_api_key)
-    prompt = describe_prompt(name, notes)
+def describe_character(
+    name: str, images: list[bytes], notes: str = ""
+) -> tuple[CharacterDraft, int]:
+    """Draft a short visual description and must-have traits from the reference images."""
+    client = _client()
     parts = [types.Part.from_bytes(data=img, mime_type="image/png") for img in images]
     response = client.models.generate_content(
         model=settings.gemini_model,
-        contents=[*parts, prompt],
-        config=types.GenerateContentConfig(temperature=0.2),
+        contents=[*parts, describe_prompt(name, notes)],
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json", response_schema=CharacterDraft, temperature=0.2
+        ),
     )
-    return (response.text or "").strip()
+    return CharacterDraft.model_validate_json(response.text), _tokens(response)
+
+
+def sheet_prompt(character: Character, bible: Bible) -> str:
+    traits = "; ".join(character.traits)
+    return f"""Draw a character model sheet of {character.name} for a comic: full body seen from
+the front, in three-quarter view and from the side, standing in a neutral pose, side by side
+on a plain light background. The same character in every view.
+Look: {character.appearance or "as in the reference images"}.
+{f"Must have: {traits}." if traits else ""}
+Art style: {bible.style.positive}. Avoid: {bible.style.negative}.
+The reference images show this character; keep their design, but draw it in the art style
+above. No text, no labels, no other characters."""
+
+
+def _image_bytes(response) -> bytes:
+    for part in response.candidates[0].content.parts if response.candidates else []:
+        if part.inline_data and part.inline_data.data:
+            return part.inline_data.data
+    raise RuntimeError("Gemini returned no image")
+
+
+def draw_sheet(character: Character, images: list[bytes], bible: Bible) -> tuple[bytes, int]:
+    client = _client()
+    parts = [types.Part.from_bytes(data=img, mime_type="image/png") for img in images]
+    response = client.models.generate_content(
+        model=settings.gemini_image_model,
+        contents=[*parts, sheet_prompt(character, bible)],
+        config=types.GenerateContentConfig(
+            response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="16:9")
+        ),
+    )
+    return _image_bytes(response), _tokens(response)

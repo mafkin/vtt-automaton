@@ -93,7 +93,20 @@ so they can be made while a session is recording.
 (`data/comic/bible.json`): the setting and tone, the art style and things to avoid, the
 language of the speech balloons, and the characters, with names and aliases as they appear in
 transcripts, a short appearance text and reference images. Reference images should show only
-the character; **Draft description from images** lets Gemini write the appearance text.
+the character; **Draft description from images** lets Gemini write the appearance text and
+the character's **must-haves** (details the page drawer is told never to change).
+
+**Consistency.** Three things keep characters and pages looking the same:
+- **Character sheets:** **Draw character sheet** draws the character in the comic's own style
+  (front, three-quarter and side view, plain background) from the reference images. Approve
+  one and every page uses it as the character's reference instead of the first image.
+- **Page look:** a fixed description of lettering, balloons, borders and page colour, added to
+  every page.
+- **Style reference:** **Use as style reference** under a drawn page you like sends that page
+  with every new page as the style to match (Comic Bible card: shown, and removable).
+
+Each drawing records what it was made with; when a comic has been drawn more than once,
+**Compare drawing rounds** shows the rounds side by side, labelled with the references used.
 
 **Limits.** Drawing is what can run away, so a comic's page images and their lettering checks
 are charged to its token budget (Limits card, default 80,000 per comic; a page is about 5,500,

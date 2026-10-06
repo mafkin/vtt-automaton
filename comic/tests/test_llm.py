@@ -107,3 +107,41 @@ def test_the_gemini_client_stays_alive_during_the_call(monkeypatch):
     monkeypatch.setattr(llm.genai, "Client", FakeClient)
     result, tokens = llm.extract_events("t", campaign())
     assert result.events == "e" and tokens == 0
+
+
+# --- consistency: traits, page look, style anchor, character sheets ---------------------------
+
+from app.llm import describe_prompt, sheet_prompt  # noqa: E402
+
+
+def test_draw_prompt_lists_must_have_traits_and_page_look():
+    bible = campaign()
+    bible.characters[0].traits = ["great helm", "blue shield with three gold towers"]
+    bible.style.page_look = "white balloons, black borders"
+    p = draw_prompt(page(), bible, bible.match(page().characters))
+    assert "PENTIK must have: great helm; blue shield with three gold towers" in p
+    assert "white balloons, black borders" in p
+    assert "STYLE REFERENCE" not in p
+
+
+def test_draw_prompt_with_anchor_names_it_as_the_last_image():
+    bible = campaign()
+    cast = bible.match(page().characters)
+    p = draw_prompt(page(), bible, cast, anchor=True)
+    assert f"image {len(cast) + 1} is a STYLE REFERENCE page" in p
+    assert "don't copy its characters" in p.lower()
+
+
+def test_sheet_prompt_asks_for_views_in_the_comic_style_without_text():
+    bible = campaign()
+    rintaro = bible.characters[1]
+    rintaro.traits = ["spotted grey seal", "red headband"]
+    p = sheet_prompt(rintaro, bible)
+    assert "Rintaro" in p and "spotted grey seal; red headband" in p and "seal" in p
+    assert "ink comic on parchment" in p
+    assert "front" in p and "side" in p and "no text" in p.lower()
+
+
+def test_description_draft_asks_for_traits_too():
+    p = describe_prompt("Rintaro", "")
+    assert "traits" in p and "pose" in p

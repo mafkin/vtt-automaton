@@ -211,3 +211,18 @@ def test_containers_show_only_this_stack(client, monkeypatch):
     assert "ifc-checker" not in html and "some-standalone" not in html
     # Stopped containers are listed too.
     assert seen["query"] == {"all": "true"}
+
+
+def test_compare_grid_shows_rounds_side_by_side(client):
+    c = scripted(status="done")
+    info = comics.VersionInfo
+    comics.add_page_version(c, 0, b"a", info(round="r1", refs={"Pentik": "image"}))
+    comics.add_page_version(
+        c, 0, b"b", info(round="r2", refs={"Pentik": "sheet_1.png"}, anchor=True)
+    )
+    html = client.get(f"/api/v1/comics/{c.id}").text
+    assert "Compare" in html
+    assert "Pentik: image" in html and "Pentik: sheet_1.png · style anchor" in html
+    grid = html[html.index("Compare drawing rounds") :]
+    assert grid.index("page_1_v1.png") < grid.index("page_1_v2.png")  # round 1, then round 2
+    assert f"/api/v1/comics/{c.id}/pages/page_1_v2.png/anchor" in html

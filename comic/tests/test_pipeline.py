@@ -38,8 +38,10 @@ def gemini(monkeypatch, sessions_db):
         calls["script_moments"] = [m.title for m in moments]
         return [a_page(f"Sivu {i}") for i, _ in enumerate(moments, 1)], 2000
 
-    def draw(page, bible, cast, extra=""):
+    def draw(page, bible, cast, extra="", anchor=None):
         calls["draw"].append((page.title, [c.name for c, _ in cast], extra))
+        calls["anchor"] = anchor
+        calls["cast_png"] = [img for _, img in cast]
         return png(), 1800
 
     def read(image):
@@ -147,3 +149,30 @@ async def test_reading_a_long_transcript_never_hits_the_budget(gemini, monkeypat
     await pipeline.extract(c.id)
     c = comics.load(c.id)
     assert c.status == "events" and c.text_tokens == 34_000
+
+
+async def test_draw_uses_the_approved_sheet_and_the_style_anchor(gemini):
+    sheet = png("green")
+    bible_store.approve_sheet("pentik", bible_store.add_sheet("pentik", sheet))
+    bible_store.set_anchor(png("white"))
+    c = comics.create("ended1", "S")
+    c.script = [a_page()]
+    comics.save(c)
+    await pipeline.draw(c.id)
+    assert gemini["cast_png"] == [sheet]
+    assert gemini["anchor"] == bible_store.anchor_image()
+    c = comics.load(c.id)
+    info = c.pages[0].info["page_1_v1.png"]
+    assert info.refs == {"Pentik": "sheet_1.png"} and info.anchor is True
+    assert info.check == "ok" and info.tokens == 1800 + 1300 and info.round
+
+
+async def test_each_draw_is_its_own_round(gemini):
+    c = comics.create("ended1", "S")
+    c.script = [a_page("A"), a_page("B")]
+    comics.save(c)
+    await pipeline.draw(c.id)
+    await pipeline.draw(c.id, page_index=1, extra="kilpi")
+    rounds = comics.rounds(comics.load(c.id))
+    assert len(rounds) == 2 and rounds[1].pages == [None, "page_2_v2.png"]
+    assert rounds[0].label == "Pentik: image"

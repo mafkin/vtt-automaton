@@ -55,3 +55,23 @@ def test_drawing_is_budgeted_and_text_calls_are_only_counted():
     comics.charge(c, 2000, "image")
     with pytest.raises(BudgetExceeded, match="4000 / 5000"):
         comics.ensure_budget(c, 2500)
+
+
+def test_rounds_group_versions_for_side_by_side_comparison():
+    c = comics.create("s1", "S1")
+    page = comics.ScriptPage(title="T", panels=[comics.ScriptPanel(visual="v")])
+    c.script = [page, page]
+    info = comics.VersionInfo
+    # Round 1 draws both pages (page 1 needed an automatic redraw); round 2 redraws page 2.
+    comics.add_page_version(c, 0, b"a", info(round="r1", refs={"Pentik": "image"}))
+    comics.add_page_version(c, 0, b"b", info(round="r1", refs={"Pentik": "image"}))
+    comics.add_page_version(c, 1, b"c", info(round="r1", refs={"Pentik": "image"}))
+    comics.add_page_version(
+        c, 1, b"d", info(round="r2", refs={"Pentik": "sheet_1.png"}, anchor=True)
+    )
+    rounds = comics.rounds(comics.load(c.id))
+    assert [r.id for r in rounds] == ["r1", "r2"]
+    assert rounds[0].pages == ["page_1_v2.png", "page_2_v1.png"]  # the last try of each page
+    assert rounds[1].pages == [None, "page_2_v2.png"]
+    assert rounds[1].label == "Pentik: sheet_1.png · style anchor"
+    assert rounds[0].label == "Pentik: image"

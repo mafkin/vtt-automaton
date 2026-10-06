@@ -21,6 +21,7 @@ from app.files import write_atomic
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_SIDE = 1024
 _IMAGE_NAME = re.compile(r"[0-9a-f]{16}\.png")
+_SHEET_NAME = re.compile(r"sheet_\d+\.png")
 
 
 class BibleError(ValueError):
@@ -30,6 +31,13 @@ class BibleError(ValueError):
 class Style(BaseModel):
     positive: str = "comic book illustration, bold ink lines, flat colours"
     negative: str = "bad hands, text, watermark, signature, error"
+    # Lettering, borders and page colour: the same on every page.
+    page_look: str = (
+        "clean hand-lettered comic font, white balloons with black outlines, "
+        "black panel borders, cream parchment page"
+    )
+    # An approved page (style/anchor.png) sent with every page as the style to match.
+    anchor: str | None = None
 
 
 class Character(BaseModel):
@@ -38,7 +46,14 @@ class Character(BaseModel):
     aliases: list[str] = Field(default_factory=list)
     # Short visual description given to the script writer and the page drawer, with the images.
     appearance: str = ""
+    # Short must-haves the page drawer is told to keep, e.g. "red headband".
+    traits: list[str] = Field(default_factory=list)
     images: list[str] = Field(default_factory=list)
+    # Character sheets drawn in the comic's style; the approved one is the reference on pages.
+    sheets: list[str] = Field(default_factory=list)
+    sheet: str | None = None
+    # Sheets ever drawn: names aren't reused, so page versions that name a sheet stay right.
+    sheet_count: int = 0
 
 
 class Bible(BaseModel):
@@ -47,6 +62,8 @@ class Bible(BaseModel):
     bubble_language: str = "Finnish"
     style: Style = Field(default_factory=Style)
     characters: list[Character] = Field(default_factory=list)
+    # Gemini tokens spent on the bible itself (character sheets, description drafts).
+    tokens_used: int = 0
 
     def character(self, character_id: str) -> Character:
         for c in self.characters:
@@ -103,12 +120,20 @@ def add_character(name: str) -> Character:
     return character
 
 
-def update_character(character_id: str, name: str, aliases: list[str], appearance: str) -> None:
+def update_character(
+    character_id: str,
+    name: str,
+    aliases: list[str],
+    appearance: str,
+    traits: list[str] | None = None,
+) -> None:
     bible = load()
     character = bible.character(character_id)
     character.name = name.strip() or character.name
     character.aliases = [a.strip() for a in aliases if a.strip()]
     character.appearance = appearance.strip()
+    if traits is not None:
+        character.traits = [t.strip() for t in traits if t.strip()]
     save(bible)
 
 
@@ -155,3 +180,80 @@ def delete_image(character_id: str, name: str) -> None:
     bible.character(character_id).images.remove(name)
     save(bible)
     path.unlink(missing_ok=True)
+
+
+def add_sheet(character_id: str, png: bytes) -> str:
+    """Store a drawn character sheet (not approved yet). Numbers are never reused."""
+    bible = load()
+    character = bible.character(character_id)
+    character.sheet_count += 1
+    name = f"sheet_{character.sheet_count}.png"
+    folder = _character_dir(character_id)
+    write_atomic(folder / name, png)
+    character.sheets.append(name)
+    save(bible)
+    return name
+
+
+def sheet_path(character_id: str, name: str) -> Path:
+    character = load().character(character_id)
+    if not _SHEET_NAME.fullmatch(name) or name not in character.sheets:
+        raise KeyError(name)
+    return _character_dir(character_id) / name
+
+
+def approve_sheet(character_id: str, name: str) -> None:
+    sheet_path(character_id, name)
+    bible = load()
+    bible.character(character_id).sheet = name
+    save(bible)
+
+
+def delete_sheet(character_id: str, name: str) -> None:
+    path = sheet_path(character_id, name)
+    bible = load()
+    character = bible.character(character_id)
+    character.sheets.remove(name)
+    if character.sheet == name:
+        character.sheet = None
+    save(bible)
+    path.unlink(missing_ok=True)
+
+
+def reference_image(character: Character) -> bytes | None:
+    """What the page drawer sees of a character: the approved sheet, else the first image."""
+    if character.sheet:
+        return sheet_path(character.id, character.sheet).read_bytes()
+    if character.images:
+        return image_path(character.id, character.images[0]).read_bytes()
+    return None
+
+
+def _anchor_file() -> Path:
+    return _root() / "style" / "anchor.png"
+
+
+def set_anchor(png: bytes) -> None:
+    write_atomic(_anchor_file(), png)
+    bible = load()
+    bible.style.anchor = "anchor.png"
+    save(bible)
+
+
+def clear_anchor() -> None:
+    bible = load()
+    bible.style.anchor = None
+    save(bible)
+    _anchor_file().unlink(missing_ok=True)
+
+
+def anchor_image() -> bytes | None:
+    if not load().style.anchor or not _anchor_file().exists():
+        return None
+    return _anchor_file().read_bytes()
+
+
+def charge(tokens: int | None) -> None:
+    bible = load()
+    bible.tokens_used += tokens or 0
+    save(bible)

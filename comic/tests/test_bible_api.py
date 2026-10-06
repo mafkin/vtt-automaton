@@ -6,6 +6,7 @@ from PIL import Image
 
 from app import api, bible
 from app.api import app
+from app.llm import CharacterDraft
 
 
 @pytest.fixture
@@ -36,10 +37,12 @@ def test_campaign_fields_are_saved_and_escaped(client):
         "bubble_language": "Finnish",
         "style_positive": "ink comic",
         "style_negative": "blurry",
+        "style_page_look": "white balloons",
     }
     html = client.post("/api/v1/bible/campaign", data=form).text
     b = bible.load()
     assert (b.setting, b.style.positive, b.style.negative) == ("Restov <b>", "ink comic", "blurry")
+    assert b.style.page_look == "white balloons"
     assert "Restov &lt;b&gt;" in html and "Saved" in html
 
 
@@ -47,10 +50,16 @@ def test_characters_can_be_added_edited_and_deleted(client):
     client.post("/api/v1/bible/characters", data={"name": "Rintaro"})
     client.post(
         "/api/v1/bible/characters/rintaro",
-        data={"name": "Rintaro", "aliases": "Rin, Uminari", "appearance": "red kimono"},
+        data={
+            "name": "Rintaro",
+            "aliases": "Rin, Uminari",
+            "appearance": "red kimono",
+            "traits": "spotted grey seal\nred headband\n",
+        },
     )
     c = bible.load().characters[0]
     assert (c.aliases, c.appearance) == (["Rin", "Uminari"], "red kimono")
+    assert c.traits == ["spotted grey seal", "red headband"]
     html = client.get("/api/v1/bible").text
     assert "Rintaro" in html and "red kimono" in html
     client.post("/api/v1/bible/characters/rintaro/delete")
@@ -101,7 +110,8 @@ def test_draft_description_from_images(client, monkeypatch):
 
     def fake_describe(name, images, notes=""):
         seen.update(name=name, count=len(images), notes=notes)
-        return "tall swordsman, red <kimono>"
+        draft = CharacterDraft(appearance="tall swordsman, red <kimono>", traits=["red headband"])
+        return draft, 900
 
     monkeypatch.setattr(api, "describe_character", fake_describe)
     html = client.post(
@@ -109,7 +119,9 @@ def test_draft_description_from_images(client, monkeypatch):
     ).text
     assert seen == {"name": "Rintaro", "count": 1, "notes": "carries a katana"}
     assert "tall swordsman, red &lt;kimono&gt;" in html and "<textarea" in html
+    assert 'name="traits"' in html and "red headband" in html
     assert bible.load().characters[0].appearance == ""  # a draft: saved only with Save
+    assert bible.load().tokens_used == 900
 
 
 def test_draft_needs_images(client):
@@ -120,3 +132,51 @@ def test_draft_needs_images(client):
 
 def test_dashboard_has_the_bible_card(client):
     assert "/api/v1/bible" in client.get("/dashboard").text
+
+
+def test_sheets_draw_approve_serve_and_delete(client, monkeypatch):
+    client.post("/api/v1/bible/characters", data={"name": "Rintaro"})
+    client.post(
+        "/api/v1/bible/characters/rintaro/images", files={"files": ("a.png", png(), "image/png")}
+    )
+    seen = {}
+
+    def fake_sheet(character, images, b):
+        seen.update(name=character.name, count=len(images))
+        return png("green"), 5600
+
+    monkeypatch.setattr(api, "draw_sheet", fake_sheet)
+    html = client.post("/api/v1/bible/characters/rintaro/sheets").text
+    assert seen == {"name": "Rintaro", "count": 1}
+    assert "/api/v1/bible/characters/rintaro/sheets/sheet_1.png" in html
+    assert bible.load().tokens_used == 5600
+    assert client.get("/api/v1/bible/characters/rintaro/sheets/sheet_1.png").status_code == 200
+
+    client.post("/api/v1/bible/characters/rintaro/sheets/sheet_1.png/approve")
+    assert bible.load().character("rintaro").sheet == "sheet_1.png"
+    assert "Approved" in client.get("/api/v1/bible").text
+    client.post("/api/v1/bible/characters/rintaro/sheets/sheet_1.png/delete")
+    assert bible.load().character("rintaro").sheets == []
+
+
+def test_a_sheet_needs_reference_images(client, monkeypatch):
+    client.post("/api/v1/bible/characters", data={"name": "Rintaro"})
+    monkeypatch.setattr(api, "draw_sheet", lambda *a: (_ for _ in ()).throw(AssertionError))
+    html = client.post("/api/v1/bible/characters/rintaro/sheets").text
+    assert "Upload reference images first" in html
+
+
+def test_style_anchor_from_a_comic_page_shown_and_removed(client):
+    from app import comics
+
+    c = comics.create("ended1", "S")
+    c.script = [comics.ScriptPage(title="T", panels=[comics.ScriptPanel(visual="v")])]
+    comics.add_page_version(c, 0, png("white"))
+    html = client.post(f"/api/v1/comics/{c.id}/pages/page_1_v1.png/anchor").text
+    assert "Style reference set" in html
+    assert bible.anchor_image() == comics.page_path(c.id, "page_1_v1.png").read_bytes()
+    assert "/api/v1/bible/anchor" in client.get("/api/v1/bible").text
+    assert client.get("/api/v1/bible/anchor").status_code == 200
+    client.post("/api/v1/bible/anchor/delete")
+    assert bible.anchor_image() is None
+    assert client.get("/api/v1/bible/anchor").status_code == 404
