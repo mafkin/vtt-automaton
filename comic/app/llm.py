@@ -38,6 +38,8 @@ class Lettering(BaseModel):
 
 
 def _client() -> genai.Client:
+    """Keep the result in a variable for the whole call: the client closes its connection when
+    it is garbage-collected, so "_client().models.generate_content(...)" fails."""
     return genai.Client(api_key=settings.gemini_api_key)
 
 
@@ -81,7 +83,8 @@ Transcript:
 
 
 def extract_events(transcript: str, bible: Bible) -> tuple[EventsResult, int]:
-    response = _client().models.generate_content(
+    client = _client()
+    response = client.models.generate_content(
         model=settings.gemini_model,
         contents=events_prompt(transcript, bible),
         config=types.GenerateContentConfig(
@@ -121,7 +124,8 @@ its last panel."""
 
 
 def write_script(events: str, moments: list[Moment], bible: Bible) -> tuple[list[ScriptPage], int]:
-    response = _client().models.generate_content(
+    client = _client()
+    response = client.models.generate_content(
         model=settings.gemini_model,
         contents=script_prompt(events, moments, bible),
         config=types.GenerateContentConfig(
@@ -162,7 +166,8 @@ def draw_page(
 ) -> tuple[bytes, int]:
     """One page image (PNG) from the script, steered by one reference image per character."""
     parts = [types.Part.from_bytes(data=png, mime_type="image/png") for _, png in cast]
-    response = _client().models.generate_content(
+    client = _client()
+    response = client.models.generate_content(
         model=settings.gemini_image_model,
         contents=[*parts, draw_prompt(page, bible, [c for c, _ in cast], extra)],
         config=types.GenerateContentConfig(
@@ -178,7 +183,8 @@ def draw_page(
 
 def read_lettering(png: bytes) -> tuple[list[str], int]:
     """The speech balloon and caption texts on a page, as the model reads them."""
-    response = _client().models.generate_content(
+    client = _client()
+    response = client.models.generate_content(
         model=settings.gemini_model,
         contents=[
             types.Part.from_bytes(data=png, mime_type="image/png"),

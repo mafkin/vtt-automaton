@@ -73,3 +73,37 @@ def test_lettering_problems_missing_twice_and_extra():
 def test_a_typo_like_a_doubled_word_is_caught():
     read = ["Ota tuo elävänä!", "Hups. Arvioin evani eväni voiman väärin."]
     assert lettering_problems(page(), read) == ["missing: Hups. Arvioin eväni voiman väärin."]
+
+
+def test_the_gemini_client_stays_alive_during_the_call(monkeypatch):
+    # The real genai.Client closes its connection when garbage-collected; a call chained on a
+    # temporary client ("_client().models.generate_content(...)") failed with "client has
+    # been closed" on the server.
+    from app import llm
+
+    class Models:
+        def __init__(self, owner):
+            self.owner = owner
+
+        def generate_content(self, **kwargs):
+            assert not self.owner.state["closed"], "client was closed before the call"
+
+            class Response:
+                text = '{"events": "e", "moments": []}'
+                usage_metadata = None
+
+            return Response()
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.state = {"closed": False}
+            self.models = Models(self)
+            # The Models only holds the state, not the client (as in the real SDK).
+            self.models.owner = type("Ref", (), {"state": self.state})()
+
+        def __del__(self):
+            self.state["closed"] = True
+
+    monkeypatch.setattr(llm.genai, "Client", FakeClient)
+    result, tokens = llm.extract_events("t", campaign())
+    assert result.events == "e" and tokens == 0
