@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     jobs_dir: str = "/data/jobs"
 
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.1-pro-high"
+    gemini_model: str = "gemini-3.8-flash"
 
     # A whole comic (8-10 pages x 3-5 panels, tens of seconds per panel) takes well over an hour.
     job_timeout_seconds: int = 4 * 3600

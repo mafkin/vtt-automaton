@@ -95,11 +95,14 @@ fi
 if [[ "$(env_get COMPOSE_PROFILES "$ROOT_ENV")" == *comic* ]]; then
   PROFILES="${PROFILES:+$PROFILES,}comic"
 fi
+# The comic docker-proxy opens the Docker socket as this group (compose.yaml: group_add).
+DOCKER_GID="$(stat -c %g /var/run/docker.sock 2>/dev/null || echo 947)"
 
 umask 077  # the env files hold secrets: readable by this user only
 cat > "$ROOT_ENV" <<ENV
 CLOUDFLARE_TUNNEL_TOKEN=$TUNNEL_TOKEN
 COMPOSE_PROFILES=$PROFILES
+DOCKER_GID=$DOCKER_GID
 ENV
 cat > "$BACKEND_ENV" <<ENV
 VTT_RULES_DB_PATH=data/pf2e_remaster.db

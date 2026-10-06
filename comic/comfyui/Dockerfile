@@ -8,7 +8,7 @@ RUN git clone https://github.com/comfyanonymous/ComfyUI.git . && \
     git checkout v0.39.0
 
 RUN uv venv && \
-    uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu124
+    uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
 
 ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8188

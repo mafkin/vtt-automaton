@@ -80,6 +80,10 @@ services:
   comfyui:
     profiles: [comic]
     build: ./comic/comfyui
+    # Runs only during a comic: comic-worker starts it, and stops it afterwards to free the GPU
+    # for STT (and stops it at worker startup if compose up started it). The docker-proxy only
+    # allows that for exactly this name.
+    container_name: vtt-comfyui
     volumes:
       # Put the SDXL checkpoint at data/comfyui/models/checkpoints/sdxl.safetensors
       - ./data/comfyui/models:/app/models
@@ -91,16 +95,24 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    restart: unless-stopped
+    restart: "no"
 
   docker-proxy:
     profiles: [comic]
-    # Read-only socket proxy: the comic services may list containers (dashboard) and start or
-    # stop vtt-stt-worker (GPU handover), nothing else.
+    # Socket proxy: the comic services may list containers (dashboard) and start or stop
+    # vtt-stt-worker and vtt-comfyui (GPU handover), nothing else.
     image: wollomatic/socket-proxy:1
     environment:
-      - SP_ALLOW_GET=^/containers/json$|^/containers/vtt-stt-worker/json$
-      - SP_ALLOW_POST=^/containers/vtt-stt-worker/(start|stop)$
+      - SP_ALLOW_GET=^/containers/json$|^/containers/(vtt-stt-worker|vtt-comfyui)/json$
+      - SP_ALLOW_POST=^/containers/(vtt-stt-worker|vtt-comfyui)/(start|stop)$
+      # Listen on the compose network and accept only the comic services (the defaults,
+      # 127.0.0.1, are unreachable from other containers).
+      - SP_LISTENIP=0.0.0.0
+      - SP_ALLOWFROM=comic-api,comic-worker
+    # The image runs as nobody; it needs the host's docker group to open the socket.
+    # Check with: stat -c %g /var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:-947}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped

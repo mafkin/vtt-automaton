@@ -24,9 +24,12 @@ jobs:
             echo "::endgroup::"
           done
       - name: GPU handover names match
-        # The comic worker stops the STT container by name through docker-proxy; both must agree.
+        # The comic worker stops STT and starts/stops ComfyUI by name through docker-proxy;
+        # compose, the proxy allow-list and the worker's settings must agree.
         run: |
           COMPOSE_PROFILES=transcription,comic docker compose config > resolved.yaml
           grep -q "container_name: vtt-stt-worker" resolved.yaml
-          grep -q "vtt-stt-worker/(start|stop)" resolved.yaml
+          grep -q "container_name: vtt-comfyui" resolved.yaml
+          grep -qF "(vtt-stt-worker|vtt-comfyui)/(start|stop)" resolved.yaml
           grep -q 'stt_container_name: str = "vtt-stt-worker"' comic/app/config.py
+          grep -q 'comfyui_container_name: str = "vtt-comfyui"' comic/app/config.py
