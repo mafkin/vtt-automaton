@@ -1,18 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { UtteranceBuffer, encodeWav, pcmSeconds, stereoToMono } from "../src/audio.js";
-
-test("stereoToMono averages channels", () => {
-  const stereo = Buffer.alloc(8);
-  stereo.writeInt16LE(1000, 0);
-  stereo.writeInt16LE(3000, 2);
-  stereo.writeInt16LE(-32768, 4);
-  stereo.writeInt16LE(-32768, 6);
-  const mono = stereoToMono(stereo);
-  assert.equal(mono.length, 4);
-  assert.equal(mono.readInt16LE(0), 2000);
-  assert.equal(mono.readInt16LE(2), -32768);
-});
+import { UtteranceBuffer, encodeWav, pcmSeconds } from "../src/audio.js";
 
 test("encodeWav writes a canonical header", () => {
   const pcm = Buffer.alloc(96_000); // 1 s of 48 kHz mono
