@@ -36,3 +36,6 @@ jobs:
           # The dashboard lists containers of this compose project only.
           grep -q "^name: vtt-automaton$" resolved.yaml
           grep -q 'compose_project: str = "vtt-automaton"' comic/app/config.py
+          # The worker sends IP-Adapter references as characters/<id>/<file> in ComfyUI's input.
+          grep -q "target: /app/input/characters" resolved.yaml
+          grep -q 'reference = f"characters/' comic/app/pipeline.py

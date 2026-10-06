@@ -1,0 +1,5 @@
+<label class="block">
+    <span class="text-sm text-slate-400">Appearance (added to every panel with this character; keep it under ~40 words)</span>
+    <textarea name="appearance" rows="2" class="w-full bg-slate-800 text-white p-2 rounded">{{ appearance if appearance is defined else c.appearance }}</textarea>
+</label>
+{% if note %}<p class="text-sm {{ 'text-red-400' if error else 'text-amber-400' }}">{{ note }}</p>{% endif %}

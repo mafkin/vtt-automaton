@@ -30,6 +30,14 @@
             </div>
         </div>
 
+        <!-- Comic bible: campaign context, style and characters for every comic -->
+        <div class="bg-slate-800 p-6 rounded-lg shadow-lg border border-slate-700">
+            <h2 class="text-xl font-semibold mb-4 text-white">Comic Bible</h2>
+            <div hx-get="/api/v1/bible" hx-trigger="load" hx-swap="outerHTML">
+                <p class="text-slate-400">Loading bible...</p>
+            </div>
+        </div>
+
         <!-- Process State -->
         <div class="bg-slate-800 p-6 rounded-lg shadow-lg border border-slate-700">
             <h2 class="text-xl font-semibold mb-4 text-white">Running Processes (Docker)</h2>

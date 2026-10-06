@@ -8,12 +8,16 @@ from urllib.parse import parse_qs
 import httpx
 from arq import create_pool
 from arq.connections import RedisSettings
-from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Form, HTTPException, Request, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from app import bible
+from app.bible import BibleError
 from app.config import settings
 from app.gpu import lock_info
+from app.llm import describe_character
 from app.sessions import (
     any_live,
     ended_sessions_with_transcripts,
@@ -217,3 +221,124 @@ async def trigger_comic_generation(session_id: str, request: Request, test: bool
         "session_id": session_id,
         "test": test,
     }
+
+
+# --- comic bible -----------------------------------------------------------------------------
+
+
+def _bible_card(request: Request, message: str = "", error: bool = False) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request, "bible.html", {"bible": bible.load(), "message": message, "error": error}
+    )
+
+
+@app.get("/api/v1/bible", response_class=HTMLResponse)
+async def get_bible(request: Request):
+    return _bible_card(request)
+
+
+@app.post("/api/v1/bible/campaign", response_class=HTMLResponse)
+async def save_campaign(
+    request: Request,
+    setting: str = Form(""),
+    tone: str = Form(""),
+    bubble_language: str = Form("Finnish"),
+    style_positive: str = Form(""),
+    style_negative: str = Form(""),
+):
+    b = bible.load()
+    b.setting, b.tone = setting.strip(), tone.strip()
+    b.bubble_language = bubble_language.strip() or "Finnish"
+    b.style.positive, b.style.negative = style_positive.strip(), style_negative.strip()
+    bible.save(b)
+    return _bible_card(request, "Saved.")
+
+
+@app.post("/api/v1/bible/characters", response_class=HTMLResponse)
+async def add_character(request: Request, name: str = Form("")):
+    if not name.strip():
+        return _bible_card(request, "Name is required.", error=True)
+    bible.add_character(name)
+    return _bible_card(request, f"Added {name.strip()}.")
+
+
+@contextlib.contextmanager
+def _known_character():
+    """Unknown character or image: 404, like a missing page."""
+    try:
+        yield
+    except KeyError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown character or image") from exc
+
+
+@app.post("/api/v1/bible/characters/{character_id}", response_class=HTMLResponse)
+async def update_character(
+    request: Request,
+    character_id: str,
+    name: str = Form(""),
+    aliases: str = Form(""),
+    appearance: str = Form(""),
+):
+    with _known_character():
+        bible.update_character(character_id, name, aliases.split(","), appearance)
+    return _bible_card(request, "Saved.")
+
+
+@app.post("/api/v1/bible/characters/{character_id}/delete", response_class=HTMLResponse)
+async def delete_character(request: Request, character_id: str):
+    with _known_character():
+        bible.delete_character(character_id)
+    return _bible_card(request, "Character deleted.")
+
+
+@app.post("/api/v1/bible/characters/{character_id}/images", response_class=HTMLResponse)
+async def upload_images(request: Request, character_id: str, files: list[UploadFile]):
+    stored = 0
+    with _known_character():
+        for f in files:
+            # Read one byte past the limit so an oversize file is refused, not truncated.
+            data = await f.read(bible.MAX_UPLOAD_BYTES + 1)
+            if not data:
+                continue
+            try:
+                await run_in_threadpool(bible.add_image, character_id, data)
+            except BibleError as exc:
+                return _bible_card(request, f"{f.filename}: {exc}", error=True)
+            stored += 1
+    return _bible_card(request, f"Uploaded {stored} image(s).")
+
+
+@app.get("/api/v1/bible/characters/{character_id}/images/{name}")
+async def get_image(character_id: str, name: str):
+    with _known_character():
+        path = bible.image_path(character_id, name)
+    return FileResponse(path, media_type="image/png")
+
+
+@app.post(
+    "/api/v1/bible/characters/{character_id}/images/{name}/delete", response_class=HTMLResponse
+)
+async def delete_image(request: Request, character_id: str, name: str):
+    with _known_character():
+        bible.delete_image(character_id, name)
+    return _bible_card(request, "Image removed.")
+
+
+@app.post("/api/v1/bible/characters/{character_id}/describe", response_class=HTMLResponse)
+async def draft_appearance(request: Request, character_id: str, appearance: str = Form("")):
+    """Let Gemini draft the appearance text from the reference images. Not saved until Save."""
+    with _known_character():
+        character = bible.load().character(character_id)
+        images = [bible.image_path(character_id, n).read_bytes() for n in character.images]
+
+    def fragment(text: str, note: str, error: bool = False):
+        context = {"c": character, "appearance": text, "note": note, "error": error}
+        return templates.TemplateResponse(request, "appearance.html", context)
+
+    if not images:
+        return fragment(appearance, "Upload reference images first.", error=True)
+    try:
+        draft = await run_in_threadpool(describe_character, character.name, images, appearance)
+    except Exception as exc:  # Gemini errors vary; show them instead of a 500
+        return fragment(appearance, f"Gemini failed: {exc}", error=True)
+    return fragment(draft, "Draft from the images. Edit it, then press Save.")

@@ -1,0 +1,87 @@
+<div id="bible" class="space-y-6">
+    {% if message %}
+    <p class="{{ 'text-red-400' if error else 'text-green-400' }} font-bold">{{ message }}</p>
+    {% endif %}
+
+    <!-- Campaign: context for the script, style for every panel -->
+    <form hx-post="/api/v1/bible/campaign" hx-target="#bible" hx-swap="outerHTML" class="space-y-3">
+        <label class="block">
+            <span class="text-sm text-slate-400">Setting (where and when; what places look like)</span>
+            <textarea name="setting" rows="3" class="w-full bg-slate-700 text-white p-2 rounded">{{ bible.setting }}</textarea>
+        </label>
+        <label class="block">
+            <span class="text-sm text-slate-400">Tone (humour, what to leave out)</span>
+            <textarea name="tone" rows="2" class="w-full bg-slate-700 text-white p-2 rounded">{{ bible.tone }}</textarea>
+        </label>
+        <label class="block">
+            <span class="text-sm text-slate-400">Art style (added to every panel)</span>
+            <input name="style_positive" value="{{ bible.style.positive }}" class="w-full bg-slate-700 text-white p-2 rounded">
+        </label>
+        <label class="block">
+            <span class="text-sm text-slate-400">Avoid (negative prompt)</span>
+            <input name="style_negative" value="{{ bible.style.negative }}" class="w-full bg-slate-700 text-white p-2 rounded">
+        </label>
+        <div class="flex flex-wrap items-end gap-4">
+            <label class="block">
+                <span class="text-sm text-slate-400">Speech bubble language</span>
+                <input name="bubble_language" value="{{ bible.bubble_language }}" class="bg-slate-700 text-white p-2 rounded">
+            </label>
+            <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded">Save campaign</button>
+        </div>
+    </form>
+
+    <!-- Characters -->
+    <div class="space-y-4">
+        <h3 class="text-lg font-semibold text-white">Characters</h3>
+        <p class="text-sm text-slate-400">
+            Names and aliases should match the transcript (the character set with <code>/link</code>,
+            or names in the narration). Reference images: show only the character, ideally on a
+            plain background. A full scene gets copied into the panels. They steer panels that
+            show this character alone.
+        </p>
+        {% for c in bible.characters %}
+        <div class="bg-slate-700 p-4 rounded space-y-3" id="character-{{ c.id }}">
+            <form hx-post="/api/v1/bible/characters/{{ c.id }}" hx-target="#bible" hx-swap="outerHTML" class="space-y-2">
+                <div class="flex flex-wrap gap-2">
+                    <input name="name" value="{{ c.name }}" class="bg-slate-800 text-white p-2 rounded font-bold">
+                    <input name="aliases" value="{{ c.aliases | join(', ') }}" placeholder="Aliases, comma separated" class="flex-1 bg-slate-800 text-white p-2 rounded">
+                </div>
+                <div id="appearance-{{ c.id }}">
+                    {% include "appearance.html" %}
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded">Save</button>
+                    <button type="button" hx-post="/api/v1/bible/characters/{{ c.id }}/describe"
+                            hx-include="#appearance-{{ c.id }}" hx-target="#appearance-{{ c.id }}"
+                            class="bg-slate-500 hover:bg-slate-400 text-white px-3 py-1 rounded">
+                        Draft description from images
+                    </button>
+                    <button type="button" hx-post="/api/v1/bible/characters/{{ c.id }}/delete" hx-target="#bible" hx-swap="outerHTML"
+                            hx-confirm="Delete {{ c.name }} and their images?"
+                            class="bg-red-700 hover:bg-red-600 text-white px-3 py-1 rounded">Delete character</button>
+                </div>
+            </form>
+            <div class="flex flex-wrap gap-3">
+                {% for img in c.images %}
+                <div class="relative">
+                    <img src="/api/v1/bible/characters/{{ c.id }}/images/{{ img }}" class="h-24 rounded border border-slate-600" alt="{{ c.name }}">
+                    <button hx-post="/api/v1/bible/characters/{{ c.id }}/images/{{ img }}/delete" hx-target="#bible" hx-swap="outerHTML"
+                            class="absolute top-0 right-0 bg-red-700 text-white text-xs px-1 rounded" title="Remove image">✕</button>
+                </div>
+                {% endfor %}
+            </div>
+            <form hx-post="/api/v1/bible/characters/{{ c.id }}/images" hx-encoding="multipart/form-data"
+                  hx-target="#bible" hx-swap="outerHTML" class="flex flex-wrap items-center gap-2">
+                <input type="file" name="files" accept="image/png,image/jpeg,image/webp" multiple class="text-sm text-slate-300">
+                <button type="submit" class="bg-slate-500 hover:bg-slate-400 text-white px-3 py-1 rounded">Upload images</button>
+            </form>
+        </div>
+        {% else %}
+        <p class="text-slate-400">No characters yet.</p>
+        {% endfor %}
+        <form hx-post="/api/v1/bible/characters" hx-target="#bible" hx-swap="outerHTML" class="flex gap-2">
+            <input name="name" placeholder="Character name" class="bg-slate-700 text-white p-2 rounded">
+            <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded">Add character</button>
+        </form>
+    </div>
+</div>

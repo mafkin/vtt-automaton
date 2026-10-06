@@ -96,6 +96,8 @@ services:
       # Put the SDXL checkpoint at data/comfyui/models/checkpoints/sdxl.safetensors
       - ./data/comfyui/models:/app/models
       - ./data/comfyui/output:/app/output
+      # Comic bible reference images, for IP-Adapter (edited on the dashboard).
+      - ./data/comic/characters:/app/input/characters:ro
     deploy:
       resources:
         reservations:

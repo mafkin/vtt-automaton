@@ -83,7 +83,13 @@ is recording. Between comics ComfyUI isn't running, so the GPU is left to speech
 To enable it on the server:
 
 1. `cp comic/.env.example comic/.env` and set `GEMINI_API_KEY`.
-2. Put an SDXL checkpoint at `data/comfyui/models/checkpoints/sdxl.safetensors`.
+2. Put the models under `data/comfyui/models/`:
+   - an SDXL checkpoint at `checkpoints/sdxl.safetensors`;
+   - for character reference images (IP-Adapter), from
+     [h94/IP-Adapter](https://huggingface.co/h94/IP-Adapter):
+     `models/image_encoder/model.safetensors` saved as
+     `clip_vision/CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors`, and
+     `sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors` saved in `ipadapter/`.
 3. Add `comic` to `COMPOSE_PROFILES` in `.env` (e.g. `COMPOSE_PROFILES=transcription,comic`;
    the setup script keeps it) and set `DOCKER_GID` to the group of `/var/run/docker.sock`
    (`stat -c %g /var/run/docker.sock`; the setup script fills it in), then
@@ -91,6 +97,22 @@ To enable it on the server:
 4. Open `http://127.0.0.1:8771/dashboard` on the server, pick a finished session's transcript
    and press **Generate comic** (8–10 pages) or **Test run** (1–2 pages), or run
    `python3 scripts/trigger_comic.py [--test] [session-id]`.
+
+**Comic bible.** The dashboard's Comic Bible card holds what carries over from one comic to the
+next (`data/comic/bible.json`):
+- the setting and tone, given to Gemini when it writes the script;
+- the art style and a negative prompt, added to every panel;
+- the language of the speech bubbles;
+- characters, with names and aliases as they appear in transcripts, an appearance text added
+  to every panel they're in, and reference images. **Draft description from images** lets
+  Gemini write the appearance text for you to edit.
+
+A panel that shows exactly one character with reference images is steered toward them with
+IP-Adapter. Panels with several characters use the text only, because one IP-Adapter would
+blend them. Reference images should show only the character, ideally on a plain background; a
+whole scene gets copied into the panels. `IPADAPTER_WEIGHT` and `IPADAPTER_END_AT` in
+`comic/.env` tune how strongly. Each comic saves the bible and seed it used as
+`comic_<session>[_test]_bible.json` next to its panels.
 
 Panels land in `data/comfyui/output/` (`*_lettered.png` has the bubbles). Page assembly and
 delivery to Foundry/Discord aren't built yet. Tests: `cd comic && uv run pytest`.
