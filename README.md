@@ -95,9 +95,11 @@ language of the speech balloons, and the characters, with names and aliases as t
 transcripts, a short appearance text and reference images. Reference images should show only
 the character; **Draft description from images** lets Gemini write the appearance text.
 
-**Limits.** Every Gemini call a comic makes is charged to its token budget (Limits card,
-default 50,000 per comic; a page is about 3,500 with its lettering check). A step that would
-go over it stops with "Budget reached" instead of spending on.
+**Limits.** Drawing is what can run away, so a comic's page images and their lettering checks
+are charged to its token budget (Limits card, default 50,000 per comic; a page is about 3,500).
+Drawing stops with "Budget reached" before a page that would go over it. Reading the transcript
+and writing the script are single calls per step; their tokens are shown but not budgeted (a
+whole session is about 30,000).
 
 To enable it on the server:
 

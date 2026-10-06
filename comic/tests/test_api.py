@@ -137,13 +137,14 @@ def test_a_busy_comic_refuses_new_steps(client):
 def test_pages_tokens_and_messages_are_shown(client):
     c = scripted(status="budget")
     c.message = "Budget reached (4000 / 5000 tokens)"
-    c.tokens_used = 4000
+    c.image_tokens = 4000
+    c.text_tokens = 34_000
     comics.add_page_version(c, 0, b"\x89PNG fake")
     c.pages[0].check = "missing: Ota!"
     comics.save(c)
     comics.save_limits(Limits(token_budget_per_comic=5000))
     html = client.get(f"/api/v1/comics/{c.id}").text
-    assert "Budget reached" in html and "4000 / 5000" in html
+    assert "Budget reached" in html and "4000 / 5000" in html and "34000" in html
     assert f"/api/v1/comics/{c.id}/pages/page_1_v1.png" in html and "missing: Ota!" in html
     r = client.get(f"/api/v1/comics/{c.id}/pages/page_1_v1.png")
     assert r.status_code == 200 and r.content == b"\x89PNG fake"

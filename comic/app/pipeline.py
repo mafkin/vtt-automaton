@@ -1,8 +1,9 @@
 """The comic steps the worker runs: extract events, write the script, draw pages.
 
-Each step loads the comic, does its Gemini calls (charging every one to the comic's token
-budget), saves the result and leaves the comic in a state the dashboard can show. A step never
-leaves the comic "busy": failures end as "failed", an exhausted budget as "budget".
+Each step loads the comic, does its Gemini calls (counting their tokens; drawing is checked
+against the comic's budget before every page), saves the result and leaves the comic in a
+state the dashboard can show. A step never leaves the comic "busy": failures end as "failed",
+an exhausted budget as "budget".
 """
 
 import asyncio
@@ -21,11 +22,6 @@ logger = logging.getLogger(__name__)
 # Tokens to have left before drawing a page: the image (~1,800 in the spike) plus the
 # lettering check (~1,300), rounded up.
 PAGE_ESTIMATE = 3500
-
-
-def _text_estimate(text: str) -> int:
-    # Roughly 3 characters per token for Finnish, plus room for the answer.
-    return len(text) // 3 + 4000
 
 
 async def _run(comic_id: str, busy: str, step: Callable[[Comic], Awaitable[str]]) -> None:
@@ -49,9 +45,8 @@ async def extract(comic_id: str) -> None:
         transcript = get_transcript(comic.session_id)
         if not transcript.strip():
             raise ValueError("The session has no transcript")
-        comics.ensure_budget(comic, _text_estimate(transcript))
         result, tokens = await asyncio.to_thread(extract_events, transcript, bible)
-        comics.charge(comic, tokens)
+        comics.charge(comic, tokens, "text")
         comic.events, comic.moments = result.events, result.moments
         return "events"
 
@@ -65,11 +60,10 @@ async def script(comic_id: str, chosen: list[int], own: str = "") -> None:
             moments.append(Moment(title=own.strip()))
         if not moments:
             raise ValueError("Choose at least one moment")
-        comics.ensure_budget(comic, _text_estimate(comic.events))
         pages, tokens = await asyncio.to_thread(
             write_script, comic.events, moments, bible_store.load()
         )
-        comics.charge(comic, tokens)
+        comics.charge(comic, tokens, "text")
         comic.script, comic.pages = pages, []
         return "script"
 
@@ -100,10 +94,10 @@ async def _draw_page(comic: Comic, index: int, bible: Bible, extra: str) -> None
     for attempt in range(attempts):
         comics.ensure_budget(comic, PAGE_ESTIMATE)
         png, tokens = await asyncio.to_thread(draw_page, page, bible, cast, extra)
-        comics.charge(comic, tokens)
+        comics.charge(comic, tokens, "image")
         comics.add_page_version(comic, index, png)
         read, tokens = await asyncio.to_thread(read_lettering, png)
-        comics.charge(comic, tokens)
+        comics.charge(comic, tokens, "image")  # part of drawing: it decides on redraws
         problems = lettering_problems(page, read)
         comic.pages[index].check = "; ".join(problems) or "ok"
         comics.save(comic)

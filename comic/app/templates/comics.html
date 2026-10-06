@@ -25,7 +25,7 @@
                     {{ c.label }}
                 </button>
                 <span class="text-sm {{ 'text-amber-400' if c.status in busy else 'text-slate-400' }}">
-                    {{ c.status }} · {{ c.script | length }} page(s) · {{ c.tokens_used }} / {{ budget }} tokens
+                    {{ c.status }} · {{ c.script | length }} page(s) · drawing {{ c.image_tokens }} / {{ budget }} tokens
                 </span>
             </li>
             {% endfor %}

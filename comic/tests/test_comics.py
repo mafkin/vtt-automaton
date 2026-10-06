@@ -6,7 +6,7 @@ from app.comics import BudgetExceeded, Limits
 
 def test_create_load_and_list():
     c = comics.create("tyrmia-e3", "Tyrmia ja Turpakarajia E3")
-    assert c.status == "new" and c.tokens_used == 0
+    assert c.status == "new" and c.image_tokens == 0 and c.text_tokens == 0
     assert comics.load(c.id).label == "Tyrmia ja Turpakarajia E3"
     assert [x.id for x in comics.list_comics()] == [c.id]
 
@@ -43,13 +43,15 @@ def test_limits_round_trip_with_defaults():
     assert comics.load_limits().token_budget_per_comic == 3000
 
 
-def test_every_call_is_charged_and_the_budget_stops_the_next_image():
+def test_drawing_is_budgeted_and_text_calls_are_only_counted():
     comics.save_limits(Limits(token_budget_per_comic=5000))
     c = comics.create("s1", "S1")
-    comics.charge(c, 2000)
-    comics.charge(c, None)  # a response without usage data costs nothing, not a crash
-    assert comics.load(c.id).tokens_used == 2000
+    comics.charge(c, 30_000, "text")  # reading a long transcript: counted, not budgeted
+    comics.charge(c, 2000, "image")
+    comics.charge(c, None, "image")  # a response without usage data costs nothing
+    c = comics.load(c.id)
+    assert (c.text_tokens, c.image_tokens) == (30_000, 2000)
     comics.ensure_budget(c, 2500)  # 4500 <= 5000: allowed
-    comics.charge(c, 2000)
+    comics.charge(c, 2000, "image")
     with pytest.raises(BudgetExceeded, match="4000 / 5000"):
         comics.ensure_budget(c, 2500)

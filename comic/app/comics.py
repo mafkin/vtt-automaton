@@ -32,7 +32,8 @@ class BudgetExceeded(RuntimeError):
 
 
 class Limits(BaseModel):
-    # All Gemini tokens one comic may use (events, script, pages, lettering checks).
+    # Tokens one comic may spend on drawing: page images and their lettering checks. Reading
+    # the transcript and writing the script are single calls; they're counted, not budgeted.
     token_budget_per_comic: int = 50_000
     # Automatic redraws of a page whose lettering doesn't match the script.
     max_auto_redraws_per_page: int = 1
@@ -81,7 +82,10 @@ class Comic(BaseModel):
     moments: list[Moment] = Field(default_factory=list)
     script: list[ScriptPage] = Field(default_factory=list)
     pages: list[PageState] = Field(default_factory=list)
-    tokens_used: int = 0
+    # Drawing (page images + lettering checks): counts against the budget.
+    image_tokens: int = 0
+    # Reading the transcript and writing the script: shown, not budgeted.
+    text_tokens: int = 0
 
 
 def _root() -> Path:
@@ -154,17 +158,20 @@ def save_limits(limits: Limits) -> None:
     write_atomic(_root().parent / "limits.json", limits.model_dump_json(indent=2).encode())
 
 
-def charge(comic: Comic, tokens: int | None) -> None:
+def charge(comic: Comic, tokens: int | None, kind: Literal["image", "text"]) -> None:
     """Add a Gemini call's total tokens to the comic and save it."""
-    comic.tokens_used += tokens or 0
+    if kind == "image":
+        comic.image_tokens += tokens or 0
+    else:
+        comic.text_tokens += tokens or 0
     save(comic)
 
 
 def ensure_budget(comic: Comic, estimate: int) -> None:
-    """Refuse a call that could take the comic over its budget."""
+    """Refuse a drawing call that could take the comic over its budget."""
     budget = load_limits().token_budget_per_comic
-    if comic.tokens_used + estimate > budget:
+    if comic.image_tokens + estimate > budget:
         raise BudgetExceeded(
-            f"Budget reached ({comic.tokens_used} / {budget} tokens) – raise the limit "
+            f"Budget reached ({comic.image_tokens} / {budget} tokens) – raise the limit "
             "or redraw fewer pages"
         )

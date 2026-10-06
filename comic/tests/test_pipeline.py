@@ -62,7 +62,7 @@ async def test_extract_stores_events_moments_and_tokens(gemini):
     c = comics.load(c.id)
     assert c.status == "events" and c.events == "1. Fight"
     assert [m.title for m in c.moments] == ["Kuulustelu", "Tikari"]
-    assert c.tokens_used == 1000
+    assert (c.text_tokens, c.image_tokens) == (1000, 0)
     assert "Örkit hyökkäävät." in gemini["transcript"]
 
 
@@ -73,7 +73,7 @@ async def test_script_uses_the_chosen_moments_and_your_own(gemini):
     c = comics.load(c.id)
     assert gemini["script_moments"] == ["Tikari", "Käl heittää tikarin kattoon"]
     assert c.status == "script" and [p.title for p in c.script] == ["Sivu 1", "Sivu 2"]
-    assert c.tokens_used == 3000
+    assert (c.text_tokens, c.image_tokens) == (3000, 0)
 
 
 async def test_draw_letters_checks_and_sends_only_the_pages_cast(gemini):
@@ -85,7 +85,8 @@ async def test_draw_letters_checks_and_sends_only_the_pages_cast(gemini):
     assert c.status == "done" and c.pages[0].versions == ["page_1_v1.png"]
     assert c.pages[0].check == "ok"
     assert gemini["draw"] == [("Sivu", ["Pentik"], "")]
-    assert c.tokens_used == 1800 + 1300
+    # The lettering check belongs to drawing: both count against the budget.
+    assert (c.text_tokens, c.image_tokens) == (0, 1800 + 1300)
 
 
 async def test_a_lettering_mismatch_is_redrawn_once_and_reported(gemini):
@@ -114,7 +115,7 @@ async def test_the_budget_stops_before_an_image_call(gemini):
     comics.save_limits(Limits(token_budget_per_comic=3000))
     c = comics.create("ended1", "S")
     c.script = [a_page("A"), a_page("B")]
-    c.tokens_used = 1000
+    c.image_tokens = 1000
     comics.save(c)
     await pipeline.draw(c.id)
     c = comics.load(c.id)
@@ -133,3 +134,16 @@ async def test_a_failure_is_shown_and_never_leaves_the_comic_busy(gemini, monkey
     await pipeline.draw(c.id)
     c = comics.load(c.id)
     assert c.status == "failed" and "no image" in c.message
+
+
+async def test_reading_a_long_transcript_never_hits_the_budget(gemini, monkeypatch):
+    comics.save_limits(Limits(token_budget_per_comic=100))
+
+    def expensive(transcript, bible):
+        return EventsResult(events="1. Fight", moments=[]), 34_000
+
+    monkeypatch.setattr(pipeline, "extract_events", expensive)
+    c = comics.create("ended1", "S")
+    await pipeline.extract(c.id)
+    c = comics.load(c.id)
+    assert c.status == "events" and c.text_tokens == 34_000

@@ -2,7 +2,7 @@
      {% if busy %}hx-get="/api/v1/comics/{{ c.id }}" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
     <div class="flex flex-wrap justify-between gap-2">
         <h3 class="text-lg font-semibold text-white">{{ c.label }}</h3>
-        <span class="text-sm text-slate-400">{{ c.tokens_used }} / {{ budget }} tokens</span>
+        <span class="text-sm text-slate-400" title="Drawing (page images and lettering checks) counts against the budget; reading the transcript and writing the script do not.">drawing {{ c.image_tokens }} / {{ budget }} tokens · text {{ c.text_tokens }}</span>
     </div>
     {% if notice %}<p class="text-amber-400 font-bold">{{ notice }}</p>{% endif %}
     {% if c.message %}
