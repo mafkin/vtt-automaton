@@ -1,7 +1,5 @@
 // User-facing texts (Finnish: the table plays in Finnish).
 
-import { HttpError } from "./clients.js";
-
 export function formatDuration(seconds: number): string {
   const minutes = Math.max(0, Math.round(seconds / 60));
   const h = Math.floor(minutes / 60);
@@ -36,16 +34,5 @@ export const text = {
   optedOut: "Puhettasi ei enää nauhoiteta eikä litteroida. Palaa mukaan komennolla `/optin`.",
   optedIn: "Puheesi on taas mukana litteroinnissa.",
   backendError: (message: string) => `Taustapalvelu ei vastannut: ${message}`,
-  comicInProgress:
-    "🎨 Sarjakuvaa generoidaan, joten puheentunnistus ei ole nyt käytettävissä. Yritä uudelleen, kun se on valmis.",
 };
 
-// Why /session start failed, in words for the table.
-export function sessionStartError(error: unknown): string {
-  // The backend refuses while the comic worker holds the GPU (speech-to-text is stopped).
-  const comic = error instanceof HttpError && error.status === 409;
-  if (comic && error.body.includes("comic_in_progress")) {
-    return text.comicInProgress;
-  }
-  return text.backendError((error as Error).message);
-}

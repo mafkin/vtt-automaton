@@ -1,6 +1,3 @@
-import os
-import time
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -89,25 +86,3 @@ def test_store_orders_by_start_time(tmp_path):
                                                 t_start=10, t_end=30, text="first"))  # fmt: skip
     assert [s.text for s in store.transcript(session.id)] == ["first", "second"]
     assert format_transcript(store.get(session.id), []).startswith("# x (")
-
-
-def test_no_session_starts_during_a_comic(client, rules_db):
-    # The comic worker writes this lock next to sessions.db while it holds the GPU (STT is off).
-    lock = rules_db.parent / "comic.lock"
-    lock.write_text('{"session_id": "abc", "started_at": 0}')
-    r = client.post("/api/v1/sessions", json={"label": "Session 13"}, headers=AUTH)
-    assert r.status_code == 409
-    assert r.json()["detail"] == "comic_in_progress"
-    assert client.get("/api/v1/sessions", headers=AUTH).json() == []
-
-    lock.unlink()
-    assert client.post("/api/v1/sessions", json={}, headers=AUTH).status_code == 201
-
-
-def test_a_stale_comic_lock_is_ignored(client, rules_db):
-    # Left behind by a worker that died and never came back: don't block sessions forever.
-    lock = rules_db.parent / "comic.lock"
-    lock.write_text("{}")
-    old = time.time() - 6 * 3600
-    os.utime(lock, (old, old))
-    assert client.post("/api/v1/sessions", json={}, headers=AUTH).status_code == 201
