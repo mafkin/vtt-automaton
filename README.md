@@ -96,7 +96,8 @@ transcripts, a short appearance text and reference images. Reference images shou
 the character; **Draft description from images** lets Gemini write the appearance text.
 
 **Limits.** Drawing is what can run away, so a comic's page images and their lettering checks
-are charged to its token budget (Limits card, default 50,000 per comic; a page is about 3,500).
+are charged to its token budget (Limits card, default 80,000 per comic; a page is about 5,500,
+so a 10-page comic with a few redraws fits).
 Drawing stops with "Budget reached" before a page that would go over it. Reading the transcript
 and writing the script are single calls per step; their tokens are shown but not budgeted (a
 whole session is about 30,000).

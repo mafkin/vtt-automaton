@@ -37,7 +37,7 @@ def test_page_versions_are_kept(bible_dir):
 
 def test_limits_round_trip_with_defaults():
     assert comics.load_limits() == Limits(
-        token_budget_per_comic=50_000, max_auto_redraws_per_page=1
+        token_budget_per_comic=80_000, max_auto_redraws_per_page=1
     )
     comics.save_limits(Limits(token_budget_per_comic=3000, max_auto_redraws_per_page=0))
     assert comics.load_limits().token_budget_per_comic == 3000

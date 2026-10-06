@@ -19,9 +19,9 @@ from app.sessions import transcript as get_transcript
 
 logger = logging.getLogger(__name__)
 
-# Tokens to have left before drawing a page: the image (~1,800 in the spike) plus the
-# lettering check (~1,300), rounded up.
-PAGE_ESTIMATE = 3500
+# Tokens to have left before drawing a page. Measured on the server: ~5,500 per page (prompt with
+# the cast's reference images, the image, the lettering check), rounded up.
+PAGE_ESTIMATE = 6000
 
 
 async def _run(comic_id: str, busy: str, step: Callable[[Comic], Awaitable[str]]) -> None:

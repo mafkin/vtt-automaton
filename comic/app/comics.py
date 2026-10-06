@@ -34,7 +34,7 @@ class BudgetExceeded(RuntimeError):
 class Limits(BaseModel):
     # Tokens one comic may spend on drawing: page images and their lettering checks. Reading
     # the transcript and writing the script are single calls; they're counted, not budgeted.
-    token_budget_per_comic: int = 50_000
+    token_budget_per_comic: int = 80_000
     # Automatic redraws of a page whose lettering doesn't match the script.
     max_auto_redraws_per_page: int = 1
 

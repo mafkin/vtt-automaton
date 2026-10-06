@@ -156,7 +156,7 @@ def test_unknown_comic_is_404(client):
 
 
 def test_limits_card_saves_the_budget(client):
-    assert 'value="50000"' in client.get("/api/v1/limits").text
+    assert 'value="80000"' in client.get("/api/v1/limits").text
     html = client.post(
         "/api/v1/limits", data={"token_budget_per_comic": "3000", "max_auto_redraws_per_page": "0"}
     ).text
