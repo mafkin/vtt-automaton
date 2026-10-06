@@ -84,6 +84,9 @@ services:
     # for STT (and stops it at worker startup if compose up started it). The docker-proxy only
     # allows that for exactly this name.
     container_name: vtt-comfyui
+    # Forward docker stop's SIGTERM so ComfyUI exits cleanly instead of being killed after 10 s
+    # (Python as PID 1 ignores SIGTERM).
+    init: true
     volumes:
       # Put the SDXL checkpoint at data/comfyui/models/checkpoints/sdxl.safetensors
       - ./data/comfyui/models:/app/models
