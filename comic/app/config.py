@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     # Compose project whose containers the dashboard lists (compose.yaml: name).
     compose_project: str = "vtt-automaton"
 
+    # The comic bible (bible.json, characters/<id>/ reference images); see app/bible.py.
+    bible_dir: str = "/data/comic"
+    # IP-Adapter: how strongly a panel follows a character's reference image (0-1), and the
+    # fraction of sampling steps it acts on. Higher copies more of the reference picture.
+    ipadapter_weight: float = 0.5
+    ipadapter_end_at: float = 0.8
+
     sessions_db_path: str = "/data/sessions.db"
     comfy_output_dir: str = "/comfy_output"
     jobs_dir: str = "/data/jobs"

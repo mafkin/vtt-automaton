@@ -18,3 +18,28 @@ def test_layout_writes_a_lettered_copy(tmp_path):
     lettered = tmp_path / "comic_s1_p1_pan1_00001__lettered.png"
     assert lettered.exists()
     assert Image.open(lettered).getpixel((20, 30)) == (255, 255, 255)  # a bubble was drawn
+
+
+def test_workflow_takes_negative_prompt_and_seed():
+    wf = generate_comfy_prompt("x", "p", negative="blurry", seed=99)
+    assert wf["7"]["inputs"]["text"] == "blurry"
+    assert wf["3"]["inputs"]["seed"] == 99
+    # No reference: the sampler uses the checkpoint's model directly, no IP-Adapter nodes.
+    assert wf["3"]["inputs"]["model"] == ["4", 0]
+    assert not any(n["class_type"].startswith("IPAdapter") for n in wf.values())
+
+
+def test_workflow_with_a_reference_steers_through_ip_adapter():
+    wf = generate_comfy_prompt("x", "p", reference="characters/rintaro/abc.png")
+    nodes = {n["class_type"]: (k, n) for k, n in wf.items()}
+    load_key, load = nodes["LoadImage"]
+    loader_key, loader = nodes["IPAdapterUnifiedLoader"]
+    adapter_key, adapter = nodes["IPAdapterAdvanced"]
+    assert load["inputs"]["image"] == "characters/rintaro/abc.png"
+    assert loader["inputs"] == {"model": ["4", 0], "preset": "PLUS (high strength)"}
+    assert adapter["inputs"]["model"] == [loader_key, 0]
+    assert adapter["inputs"]["ipadapter"] == [loader_key, 1]
+    assert adapter["inputs"]["image"] == [load_key, 0]
+    # Found in the spike: 0.5 up to 80% of the steps keeps the prompt's scene.
+    assert adapter["inputs"]["weight"] == 0.5 and adapter["inputs"]["end_at"] == 0.8
+    assert wf["3"]["inputs"]["model"] == [adapter_key, 0]

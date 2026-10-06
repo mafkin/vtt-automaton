@@ -57,3 +57,10 @@ def no_live_sessions(sessions_db):
         conn.execute("UPDATE sessions SET ended_at = ? WHERE id = 'live1'", (time.time(),))
     conn.close()
     return sessions_db
+
+
+@pytest.fixture(autouse=True)
+def bible_dir(tmp_path, monkeypatch):
+    path = tmp_path / "comic"
+    monkeypatch.setattr(settings, "bible_dir", str(path))
+    return path
