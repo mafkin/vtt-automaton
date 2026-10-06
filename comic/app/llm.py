@@ -144,15 +144,21 @@ def generate_page_detail(
     return PageDetail.model_validate_json(response.text)
 
 
-def describe_character(name: str, images: list[bytes], notes: str = "") -> str:
-    """Draft a short visual description of a character from their reference images."""
-    client = genai.Client(api_key=settings.gemini_api_key)
-    prompt = (
+def describe_prompt(name: str, notes: str = "") -> str:
+    return (
         f"These are reference images of {name}, a character in a fantasy tabletop campaign. "
         "Describe how they look for a text-to-image prompt: species, build, hair, face, "
         "clothing, colours and signature items. Comma-separated phrases, at most 40 words, "
-        "no names, no story." + (f" Notes from the players: {notes}" if notes else "")
+        "no names, no story. Leave out the pose, viewpoint, background and lighting of the "
+        "images: the text is reused for every panel the character appears in."
+        + (f" Notes from the players: {notes}" if notes else "")
     )
+
+
+def describe_character(name: str, images: list[bytes], notes: str = "") -> str:
+    """Draft a short visual description of a character from their reference images."""
+    client = genai.Client(api_key=settings.gemini_api_key)
+    prompt = describe_prompt(name, notes)
     parts = [types.Part.from_bytes(data=img, mime_type="image/png") for img in images]
     response = client.models.generate_content(
         model=settings.gemini_model,

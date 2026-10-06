@@ -174,3 +174,12 @@ async def test_a_run_uses_and_saves_the_bible_and_one_seed(fake_pipeline, tmp_pa
     seeds = [kw["seed"] for kw in fake_pipeline["render_kwargs"]]
     assert len(set(seeds)) == len(seeds)  # each panel its own seed, derived from the comic's
     assert seeds[0] == snapshot["seed"] + 101
+
+
+def test_the_appearance_draft_leaves_out_pose_and_lighting():
+    # The text goes into every panel: "seen from behind" would turn the character around in all.
+    from app.llm import describe_prompt
+
+    prompt = describe_prompt("Rintaro", "carries a katana")
+    assert "pose" in prompt and "viewpoint" in prompt and "lighting" in prompt
+    assert "carries a katana" in prompt and "at most 40 words" in prompt
