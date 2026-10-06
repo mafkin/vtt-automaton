@@ -98,6 +98,8 @@ services:
     - backend
     - redis
     restart: unless-stopped
+    ports:
+    - 127.0.0.1:8771:8771
   comic-worker:
     profiles:
     - comic
