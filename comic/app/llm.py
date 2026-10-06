@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from app.bible import Bible, Character
 from app.comics import Moment, ScriptPage
 from app.config import settings
+from app.scale import scale_line
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,8 @@ def bible_context(bible: Bible) -> str:
         for c in bible.characters:
             also = f" (also: {', '.join(c.aliases)})" if c.aliases else ""
             look = f": {c.appearance}" if c.appearance else ""
+            if c.height_cm:
+                look += f" (height {c.height_cm:g} cm)"
             spec = (f". Must have: {'; '.join(c.traits)}" if c.traits else "") + (
                 f". Never: {'; '.join(c.never)}" if c.never else ""
             )
@@ -193,6 +196,9 @@ def draw_prompt(
         for i, p in enumerate(page.panels, 1)
     )
     refs = "\n".join(lines)
+    sizes = scale_line(bible.match(page.characters))
+    if sizes:
+        refs += f"\nSizes (these win over the reference images, which aren't to scale): {sizes}"
     return f"""Draw one finished comic page with {len(page.panels)} panels, clean gutters, and the
 title "{page.title}" at the top, lettered exactly like that.
 Art style: {bible.style.positive}. Avoid: {bible.style.negative}.
@@ -353,6 +359,7 @@ on a plain light background. The same character in every view.
 Look: {character.appearance or "as in the reference images"}.
 {f"Must have: {traits}." if traits else ""}
 {f"Never: {never}." if never else ""}
+{f"Size: {size}" if (size := scale_line([character])) else ""}
 Art style: {bible.style.positive}. Avoid: {bible.style.negative}.
 The reference images show this character; keep their design, but draw it in the art style
 above. No text, no labels, no other characters."""

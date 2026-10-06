@@ -233,3 +233,26 @@ def test_the_script_writer_knows_each_characters_must_haves_and_never_list():
     assert "Pentik: great helm. Must have: flail. Never: a sword" in context
     p = script_prompt("1. Fight", [Moment(title="T")], bible)
     assert "Never: a sword" in p and "must-haves" in p.lower()
+
+
+def test_draw_prompt_states_sizes_of_the_characters_on_the_page():
+    bible = campaign()
+    bible.characters[0].height_cm = 185  # Pentik
+    bible.characters[1].height_cm = 60  # Rintaro, on the page as "Rin"
+    bible.characters.append(Character(id="kal", name="Käl", height_cm=160))  # not on the page
+    p = draw_prompt(page(), bible, [])
+    assert "Sizes (these win over the reference images" in p
+    assert "RINTARO (60 cm) is 32% of PENTIK's height" in p
+    assert "KÄL" not in p
+
+
+def test_draw_prompt_without_heights_has_no_size_line():
+    assert "Sizes" not in draw_prompt(page(), campaign(), [])
+
+
+def test_sheet_prompt_and_bible_context_carry_the_height():
+    bible = campaign()
+    rintaro = bible.characters[1]
+    rintaro.height_cm = 60
+    assert "Size: RINTARO is 60 cm tall" in sheet_prompt(rintaro, bible)
+    assert "Rintaro (also: Rin): seal (height 60 cm)" in bible_context(bible)

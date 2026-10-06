@@ -56,6 +56,10 @@ The drawer corrects a misspelling in the script ("Väistykaa" → "Väistykää"
 The drawing budget is per comic (Limits card, default 80,000). It covers page images and their checks, and drawing stops before a page that would go over it. The whole test (three pages, four rounds plus sheets) used about 145,000 drawing tokens.
 
 ## Recommendations
+0. Set every character's **height** in the bible (cm). Reference images aren't to scale, so
+   each page and character sheet states the relative sizes of exactly the characters in it,
+   compared with the tallest one present (e.g. "the top of RINTARO's head reaches PENTIK's
+   knees"). Characters without a height are left out of the comparison.
 1. Aim for recognisable characters. Keep must-haves to big visible features; put exact insignia only where they matter.
 2. One draw per page (automatic redraws 0); redraw the few bad pages by hand with an instruction.
 3. Fewer characters per panel, and close-ups when a detail matters to the joke.

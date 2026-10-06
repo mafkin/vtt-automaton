@@ -60,7 +60,9 @@
             Names and aliases should match the transcript (the character set with <code>/link</code>,
             or names in the narration). The first reference image of every character on a page
             is given to the image model, so show only the character, clearly; other people in
-            the picture can end up in the comic.
+            the picture can end up in the comic. Set every character's height (cm, or e.g.
+            1.8 m): reference images aren't to scale, so pages state the relative sizes of the
+            characters on them instead.
         </p>
         {% for c in bible.characters %}
         <div class="bg-slate-700 p-4 rounded space-y-3" id="character-{{ c.id }}">
@@ -68,6 +70,12 @@
                 <div class="flex flex-wrap gap-2">
                     <input name="name" value="{{ c.name }}" class="bg-slate-800 text-white p-2 rounded font-bold">
                     <input name="aliases" value="{{ c.aliases | join(', ') }}" placeholder="Aliases, comma separated" class="flex-1 bg-slate-800 text-white p-2 rounded">
+                    <label class="flex items-center gap-2 text-sm text-slate-400" title="Standing height. Pages state the relative sizes of the characters on them, e.g. how far up Pentik the top of Rintaro's head reaches.">
+                        Height
+                        <input type="hidden" name="height_field" value="1">
+                        <input name="height" value="{{ '%g' | format(c.height_cm) if c.height_cm else '' }}" placeholder="cm" inputmode="decimal" class="w-20 bg-slate-800 text-white p-2 rounded">
+                        cm
+                    </label>
                 </div>
                 <div id="appearance-{{ c.id }}">
                     {% include "appearance.html" %}

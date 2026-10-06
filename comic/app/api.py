@@ -16,6 +16,7 @@ from app import bible, comics
 from app.bible import BibleError
 from app.config import settings
 from app.llm import describe_character, draw_detail_sheet, draw_sheet
+from app.scale import parse_height
 from app.sessions import (
     character_tags,
     ended_sessions_with_transcripts,
@@ -357,7 +358,15 @@ async def update_character(
     appearance: str = Form(""),
     traits: str | None = Form(None),
     never: str | None = Form(None),
+    height: str | None = Form(None),
+    # Sent by the bible form next to "height": FastAPI turns an empty field into "not sent", so
+    # this tells "cleared" apart from a client that doesn't send heights at all.
+    height_field: str | None = Form(None),
 ):
+    try:
+        height_cm = parse_height(height or "") if height_field else "keep"
+    except ValueError as exc:
+        return _bible_card(request, str(exc), error=True)
     with _known_character():
         bible.update_character(
             character_id,
@@ -366,6 +375,7 @@ async def update_character(
             appearance,
             traits.splitlines() if traits is not None else None,
             never.splitlines() if never is not None else None,
+            height_cm,
         )
     return _bible_card(request, "Saved.")
 

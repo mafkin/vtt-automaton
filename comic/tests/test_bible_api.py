@@ -220,3 +220,22 @@ def test_detail_sheet_needs_an_approved_sheet_and_uses_it(client, monkeypatch):
     client.post("/api/v1/bible/characters/pentik/sheets/detail_2.png/approve")
     assert bible.load().character("pentik").detail == "detail_2.png"
     assert "Draw detail sheet" in client.get("/api/v1/bible").text
+
+
+def test_height_is_set_from_the_form_shown_and_validated(client):
+    client.post("/api/v1/bible/characters", data={"name": "Rintaro"})
+    form = {"name": "Rintaro", "aliases": "", "appearance": "seal", "height_field": "1"}
+    client.post("/api/v1/bible/characters/rintaro", data={**form, "height": "0,6 m"})
+    assert bible.load().characters[0].height_cm == 60
+    assert 'name="height" value="60"' in client.get("/api/v1/bible").text
+
+    html = client.post("/api/v1/bible/characters/rintaro", data={**form, "height": "tall"}).text
+    assert "Height must be a number" in html
+    assert bible.load().characters[0].height_cm == 60  # a bad value changes nothing
+
+    without = {k: v for k, v in form.items() if k != "height_field"}
+    client.post("/api/v1/bible/characters/rintaro", data=without)  # e.g. an older form
+    assert bible.load().characters[0].height_cm == 60
+
+    client.post("/api/v1/bible/characters/rintaro", data={**form, "height": ""})  # cleared
+    assert bible.load().characters[0].height_cm is None
