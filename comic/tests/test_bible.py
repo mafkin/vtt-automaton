@@ -85,3 +85,9 @@ def test_deleting_removes_files(bible_dir):
     bible.delete_character(ch.id)
     assert bible.load().characters == []
     assert not (bible_dir / "characters" / "rintaro").exists()
+
+
+def test_the_saved_bible_is_readable_on_the_host(bible_dir):
+    # The containers write it as root; the server's user should still be able to read it.
+    bible.save(bible.load())
+    assert (bible_dir / "bible.json").stat().st_mode & 0o777 == 0o644

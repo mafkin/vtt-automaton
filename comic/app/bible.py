@@ -88,6 +88,7 @@ def save(bible: Bible) -> None:
     fd, tmp = tempfile.mkstemp(dir=root, suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(json.dumps(bible.model_dump(), ensure_ascii=False, indent=2))
+    os.chmod(tmp, 0o644)  # mkstemp makes it 0600; keep it readable for the host user
     os.replace(tmp, root / "bible.json")
 
 
