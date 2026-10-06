@@ -104,6 +104,17 @@ the character's **must-haves** (details the page drawer is told never to change)
   every page.
 - **Style reference:** **Use as style reference** under a drawn page you like sends that page
   with every new page as the style to match (Comic Bible card: shown, and removable).
+- **Exact specs:** each character's must-haves (exact about shape, colour and position) and a
+  **never** list ("a tabard", "a cross on the helm") are given to the page drawer, and win over
+  the panel descriptions.
+- **Detail sheets:** **Draw detail sheet** (after a sheet is approved) draws large close-ups of
+  helm, emblem, shield and weapon; once approved it's sent with the sheet on every page.
+- **Continuity:** each page is drawn with the page before it, so looks and rendering carry over.
+- **Look check:** the same call that reads the lettering back also checks each character
+  against their must-haves and never list; a clear miss is redrawn like a lettering error
+  (Limits card: on by default).
+- **Speaker tags:** the transcript preview shows the session's `/link` characters with ✓ when
+  the bible knows them, ✗ when it doesn't (add the name or an alias).
 
 Each drawing records what it was made with; when a comic has been drawn more than once,
 **Compare drawing rounds** shows the rounds side by side, labelled with the references used.

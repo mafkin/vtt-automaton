@@ -11,6 +11,7 @@ import secrets
 import shutil
 import unicodedata
 from pathlib import Path
+from typing import Literal
 
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
@@ -21,7 +22,7 @@ from app.files import write_atomic
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_SIDE = 1024
 _IMAGE_NAME = re.compile(r"[0-9a-f]{16}\.png")
-_SHEET_NAME = re.compile(r"sheet_\d+\.png")
+_SHEET_NAME = re.compile(r"(sheet|detail)_\d+\.png")
 
 
 class BibleError(ValueError):
@@ -48,10 +49,14 @@ class Character(BaseModel):
     appearance: str = ""
     # Short must-haves the page drawer is told to keep, e.g. "red headband".
     traits: list[str] = Field(default_factory=list)
+    # What the page drawer must never give this character, e.g. "a tabard".
+    never: list[str] = Field(default_factory=list)
     images: list[str] = Field(default_factory=list)
     # Character sheets drawn in the comic's style; the approved one is the reference on pages.
     sheets: list[str] = Field(default_factory=list)
     sheet: str | None = None
+    # Approved close-ups of the details (helm, emblem, shield, weapon): a second reference.
+    detail: str | None = None
     # Sheets ever drawn: names aren't reused, so page versions that name a sheet stay right.
     sheet_count: int = 0
 
@@ -126,6 +131,7 @@ def update_character(
     aliases: list[str],
     appearance: str,
     traits: list[str] | None = None,
+    never: list[str] | None = None,
 ) -> None:
     bible = load()
     character = bible.character(character_id)
@@ -134,6 +140,8 @@ def update_character(
     character.appearance = appearance.strip()
     if traits is not None:
         character.traits = [t.strip() for t in traits if t.strip()]
+    if never is not None:
+        character.never = [t.strip() for t in never if t.strip()]
     save(bible)
 
 
@@ -182,12 +190,13 @@ def delete_image(character_id: str, name: str) -> None:
     path.unlink(missing_ok=True)
 
 
-def add_sheet(character_id: str, png: bytes) -> str:
-    """Store a drawn character sheet (not approved yet). Numbers are never reused."""
+def add_sheet(character_id: str, png: bytes, kind: Literal["sheet", "detail"] = "sheet") -> str:
+    """Store a drawn full-body sheet or detail sheet (not approved yet). Numbers are shared by
+    both kinds and never reused."""
     bible = load()
     character = bible.character(character_id)
     character.sheet_count += 1
-    name = f"sheet_{character.sheet_count}.png"
+    name = f"{kind}_{character.sheet_count}.png"
     folder = _character_dir(character_id)
     write_atomic(folder / name, png)
     character.sheets.append(name)
@@ -205,7 +214,11 @@ def sheet_path(character_id: str, name: str) -> Path:
 def approve_sheet(character_id: str, name: str) -> None:
     sheet_path(character_id, name)
     bible = load()
-    bible.character(character_id).sheet = name
+    character = bible.character(character_id)
+    if name.startswith("detail_"):
+        character.detail = name
+    else:
+        character.sheet = name
     save(bible)
 
 
@@ -216,6 +229,8 @@ def delete_sheet(character_id: str, name: str) -> None:
     character.sheets.remove(name)
     if character.sheet == name:
         character.sheet = None
+    if character.detail == name:
+        character.detail = None
     save(bible)
     path.unlink(missing_ok=True)
 
@@ -227,6 +242,20 @@ def reference_image(character: Character) -> bytes | None:
     if character.images:
         return image_path(character.id, character.images[0]).read_bytes()
     return None
+
+
+def references(character: Character) -> list[tuple[str, bytes]]:
+    """What the page drawer sees of a character, labelled: the full-body reference, then the
+    approved detail close-ups if any."""
+    refs: list[tuple[str, bytes]] = []
+    full = reference_image(character)
+    if full is not None:
+        refs.append(("full-body sheet" if character.sheet else "reference image", full))
+    if character.detail:
+        refs.append(
+            ("close-ups of details", sheet_path(character.id, character.detail).read_bytes())
+        )
+    return refs
 
 
 def _anchor_file() -> Path:

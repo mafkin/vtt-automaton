@@ -15,7 +15,7 @@ from app import bible as bible_store
 from app import comics
 from app.bible import Bible
 from app.comics import BudgetExceeded, Comic, Moment, VersionInfo
-from app.llm import draw_page, extract_events, lettering_problems, read_lettering, write_script
+from app.llm import draw_page, extract_events, inspect_page, lettering_problems, write_script
 from app.sessions import transcript as get_transcript
 
 logger = logging.getLogger(__name__)
@@ -90,27 +90,45 @@ async def _draw_page(
     comic: Comic, index: int, bible: Bible, extra: str, anchor: bytes | None, round_id: str
 ) -> None:
     page = comic.script[index]
-    # Each character's approved sheet, or their first reference image.
-    cast = [
-        (c, ref)
-        for c in bible.match(page.characters)
-        if (ref := bible_store.reference_image(c)) is not None
-    ]
-    refs = {c.name: c.sheet or "image" for c, _ in cast}
-    attempts = 1 + comics.load_limits().max_auto_redraws_per_page
-    for attempt in range(attempts):
+    characters = bible.match(page.characters)
+    # Each character's labelled references: the approved sheet (or first image), then details.
+    cast = [(c, refs) for c in characters if (refs := bible_store.references(c))]
+    refs = {c.name: " + ".join(filter(None, [c.sheet or "image", c.detail])) for c, _ in cast}
+    # Continuity: the page before this one as it is now (just drawn in this round, or current).
+    previous_name = comic.pages[index - 1].current if 0 < index <= len(comic.pages) else None
+    previous = comics.page_path(comic.id, previous_name).read_bytes() if previous_name else None
+    limits = comics.load_limits()
+    for attempt in range(1 + limits.max_auto_redraws_per_page):
         comics.ensure_budget(comic, PAGE_ESTIMATE)
-        png, draw_tokens = await asyncio.to_thread(draw_page, page, bible, cast, extra, anchor)
+        png, draw_tokens = await asyncio.to_thread(
+            draw_page, page, bible, cast, extra, anchor, previous
+        )
         comics.charge(comic, draw_tokens, "image")
-        info = VersionInfo(round=round_id, refs=refs, anchor=anchor is not None, extra=extra)
+        info = VersionInfo(
+            round=round_id,
+            refs=refs,
+            anchor=anchor is not None,
+            previous=previous_name,
+            extra=extra,
+        )
         name = comics.add_page_version(comic, index, png, info)
-        read, read_tokens = await asyncio.to_thread(read_lettering, png)
+        inspection, read_tokens = await asyncio.to_thread(
+            inspect_page, png, characters, limits.look_check
+        )
         comics.charge(comic, read_tokens, "image")  # part of drawing: it decides on redraws
-        problems = lettering_problems(page, read)
-        comic.pages[index].check = "; ".join(problems) or "ok"
-        info.check, info.tokens = comic.pages[index].check, draw_tokens + read_tokens
-        comic.pages[index].info[name] = info
+        lettering = lettering_problems(page, inspection.texts)
+        looks = (
+            [f"{p.character}: {p.problem}" for p in inspection.looks] if limits.look_check else []
+        )
+        state = comic.pages[index]
+        state.check = "; ".join(lettering) or "ok"
+        state.looks = "; ".join(looks)
+        info.check, info.looks = state.check, state.looks
+        info.tokens = draw_tokens + read_tokens
+        state.info[name] = info
         comics.save(comic)
-        if not problems:
+        if not lettering and not looks:
             return
-        logger.info("Comic %s page %d attempt %d: %s", comic.id, index + 1, attempt + 1, problems)
+        logger.info(
+            "Comic %s page %d attempt %d: %s", comic.id, index + 1, attempt + 1, lettering + looks
+        )

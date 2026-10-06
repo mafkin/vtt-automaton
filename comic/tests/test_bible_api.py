@@ -180,3 +180,43 @@ def test_style_anchor_from_a_comic_page_shown_and_removed(client):
     client.post("/api/v1/bible/anchor/delete")
     assert bible.anchor_image() is None
     assert client.get("/api/v1/bible/anchor").status_code == 404
+
+
+def test_never_list_is_edited_with_the_character(client):
+    client.post("/api/v1/bible/characters", data={"name": "Pentik"})
+    client.post(
+        "/api/v1/bible/characters/pentik",
+        data={
+            "name": "Pentik",
+            "aliases": "",
+            "appearance": "",
+            "traits": "",
+            "never": "a tabard\n",
+        },
+    )
+    assert bible.load().character("pentik").never == ["a tabard"]
+    assert 'name="never"' in client.get("/api/v1/bible").text
+
+
+def test_detail_sheet_needs_an_approved_sheet_and_uses_it(client, monkeypatch):
+    client.post("/api/v1/bible/characters", data={"name": "Pentik"})
+    client.post(
+        "/api/v1/bible/characters/pentik/images", files={"files": ("a.png", png(), "image/png")}
+    )
+    seen = {}
+
+    def fake_detail(character, sheet, images, b):
+        seen.update(sheet=sheet, count=len(images))
+        return png("green"), 6000
+
+    monkeypatch.setattr(api, "draw_detail_sheet", fake_detail)
+    html = client.post("/api/v1/bible/characters/pentik/details").text
+    assert "Approve a character sheet first" in html and seen == {}
+
+    bible.approve_sheet("pentik", bible.add_sheet("pentik", png("blue")))
+    html = client.post("/api/v1/bible/characters/pentik/details").text
+    assert seen == {"sheet": bible.sheet_path("pentik", "sheet_1.png").read_bytes(), "count": 1}
+    assert "detail_2.png" in html
+    client.post("/api/v1/bible/characters/pentik/sheets/detail_2.png/approve")
+    assert bible.load().character("pentik").detail == "detail_2.png"
+    assert "Draw detail sheet" in client.get("/api/v1/bible").text

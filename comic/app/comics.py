@@ -35,8 +35,11 @@ class Limits(BaseModel):
     # Tokens one comic may spend on drawing: page images and their lettering checks. Reading
     # the transcript and writing the script are single calls; they're counted, not budgeted.
     token_budget_per_comic: int = 80_000
-    # Automatic redraws of a page whose lettering doesn't match the script.
+    # Automatic redraws of a page whose lettering or looks don't pass the check.
     max_auto_redraws_per_page: int = 1
+    # Check each page's characters against their must-haves and never lists (same call as the
+    # lettering check, so it costs little).
+    look_check: bool = True
 
 
 class Moment(BaseModel):
@@ -69,9 +72,12 @@ class VersionInfo(BaseModel):
     # Character name -> the reference used: a sheet file name, or "image".
     refs: dict[str, str] = Field(default_factory=dict)
     anchor: bool = False
+    # The previous page sent along for continuity (file name), if any.
+    previous: str | None = None
     extra: str = ""
     tokens: int = 0
     check: str = ""
+    looks: str = ""
 
 
 class Round(BaseModel):
@@ -87,6 +93,8 @@ class PageState(BaseModel):
     info: dict[str, VersionInfo] = Field(default_factory=dict)
     # Result of reading the lettering back: "ok", or what didn't match.
     check: str = ""
+    # Clear breaks of the characters' must-haves / never lists ("" when fine or not checked).
+    looks: str = ""
 
     @property
     def current(self) -> str | None:
@@ -163,7 +171,8 @@ def add_page_version(comic: Comic, index: int, png: bytes, info: VersionInfo | N
 
 def _label(info: VersionInfo) -> str:
     refs = ", ".join(f"{name}: {ref}" for name, ref in sorted(info.refs.items()))
-    return " · ".join(part for part in (refs, "style anchor" if info.anchor else "") if part)
+    extras = ("style anchor" if info.anchor else "", "continuity" if info.previous else "")
+    return " · ".join(part for part in (refs, *extras) if part)
 
 
 def rounds(comic: Comic) -> list[Round]:

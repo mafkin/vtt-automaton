@@ -45,3 +45,9 @@ def test_ended_sessions_with_transcripts_skips_live_and_empty(sessions_db):
     picks = ended_sessions_with_transcripts()
     assert [(p.id, p.segments) for p in picks] == [("ended1", 2)]
     assert picks[0].label == "Session <b>12</b>"
+
+
+def test_character_tags_with_line_counts(sessions_db):
+    from app.sessions import character_tags
+
+    assert character_tags("ended1") == [("Valeros", 1)]

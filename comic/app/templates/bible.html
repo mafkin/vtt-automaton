@@ -99,10 +99,10 @@
                     {% for sh in c.sheets %}
                     <div class="space-y-1">
                         <a href="/api/v1/bible/characters/{{ c.id }}/sheets/{{ sh }}" target="_blank">
-                            <img src="/api/v1/bible/characters/{{ c.id }}/sheets/{{ sh }}" class="h-28 rounded border {{ 'border-green-400 border-2' if sh == c.sheet else 'border-slate-600' }}" alt="{{ c.name }} sheet">
+                            <img src="/api/v1/bible/characters/{{ c.id }}/sheets/{{ sh }}" class="h-28 rounded border {{ 'border-green-400 border-2' if sh in (c.sheet, c.detail) else 'border-slate-600' }}" alt="{{ c.name }} sheet">
                         </a>
                         <div class="flex gap-1 text-xs">
-                            {% if sh == c.sheet %}<span class="text-green-400 font-bold">Approved</span>{% else %}
+                            {% if sh == c.sheet or sh == c.detail %}<span class="text-green-400 font-bold">Approved</span>{% else %}
                             <button hx-post="/api/v1/bible/characters/{{ c.id }}/sheets/{{ sh }}/approve" hx-target="#bible" hx-swap="outerHTML"
                                     class="bg-green-700 hover:bg-green-600 text-white px-2 rounded">Approve</button>{% endif %}
                             <button hx-post="/api/v1/bible/characters/{{ c.id }}/sheets/{{ sh }}/delete" hx-target="#bible" hx-swap="outerHTML"
@@ -114,8 +114,15 @@
                 <button hx-post="/api/v1/bible/characters/{{ c.id }}/sheets" hx-target="#bible" hx-swap="outerHTML"
                         hx-indicator="#sheet-busy-{{ c.id }}" hx-disabled-elt="this"
                         class="bg-slate-500 hover:bg-slate-400 text-white px-3 py-1 rounded">Draw character sheet</button>
+                {% if c.sheet %}
+                <button hx-post="/api/v1/bible/characters/{{ c.id }}/details" hx-target="#bible" hx-swap="outerHTML"
+                        hx-indicator="#sheet-busy-{{ c.id }}" hx-disabled-elt="this"
+                        class="bg-slate-500 hover:bg-slate-400 text-white px-3 py-1 rounded">Draw detail sheet</button>
+                {% endif %}
                 <span id="sheet-busy-{{ c.id }}" class="htmx-indicator text-amber-400 text-sm">Drawing… (about 30 s)</span>
-                <span class="text-sm text-slate-400">{{ "Pages use the approved sheet." if c.sheet else "Pages use the first image until a sheet is approved." }}</span>
+                <span class="text-sm text-slate-400">
+                    {{ "Pages use the approved sheet" if c.sheet else "Pages use the first image until a sheet is approved" }}{{ " and detail sheet." if c.detail else "." }}
+                </span>
             </div>
             <form hx-post="/api/v1/bible/characters/{{ c.id }}/images" hx-encoding="multipart/form-data"
                   hx-target="#bible" hx-swap="outerHTML" class="flex flex-wrap items-center gap-2">

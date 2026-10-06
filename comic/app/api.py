@@ -15,8 +15,9 @@ from fastapi.templating import Jinja2Templates
 from app import bible, comics
 from app.bible import BibleError
 from app.config import settings
-from app.llm import describe_character, draw_sheet
+from app.llm import describe_character, draw_detail_sheet, draw_sheet
 from app.sessions import (
+    character_tags,
     ended_sessions_with_transcripts,
     get_session,
     recent_sessions,
@@ -102,7 +103,19 @@ async def get_transcript_preview(session_id: str) -> str:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown session")
     lines = transcript(session_id).splitlines()
     more = f"\n… {len(lines) - PREVIEW_LINES} more lines" if len(lines) > PREVIEW_LINES else ""
-    return escape("\n".join(lines[:PREVIEW_LINES]) + more)
+    # Speaker tags (/link) are how the comic knows who is who: show which match the bible.
+    known = bible.load()
+    tags = [
+        f"{'✓' if known.match([name]) else '✗'} {name} ({n})"
+        for name, n in character_tags(session_id)
+    ]
+    header = ""
+    if tags:
+        header = "Characters: " + " · ".join(tags)
+        if any(t.startswith("✗") for t in tags):
+            header += "\n✗ = not in the bible: add it as a character name or an alias."
+        header += "\n\n"
+    return escape(header + "\n".join(lines[:PREVIEW_LINES]) + more)
 
 
 # --- comics ----------------------------------------------------------------------------------
@@ -269,6 +282,7 @@ async def save_limits(
     request: Request,
     token_budget_per_comic: int = Form(...),
     max_auto_redraws_per_page: int = Form(...),
+    look_check: str | None = Form(None),  # a checkbox: absent when unticked
 ):
     limits, message = comics.load_limits(), "Saved."
     if token_budget_per_comic < 0 or not 0 <= max_auto_redraws_per_page <= 3:
@@ -277,6 +291,7 @@ async def save_limits(
         limits = comics.Limits(
             token_budget_per_comic=token_budget_per_comic,
             max_auto_redraws_per_page=max_auto_redraws_per_page,
+            look_check=look_check is not None,
         )
         comics.save_limits(limits)
     context = {"limits": limits, "message": message}
@@ -341,6 +356,7 @@ async def update_character(
     aliases: str = Form(""),
     appearance: str = Form(""),
     traits: str | None = Form(None),
+    never: str | None = Form(None),
 ):
     with _known_character():
         bible.update_character(
@@ -349,6 +365,7 @@ async def update_character(
             aliases.split(","),
             appearance,
             traits.splitlines() if traits is not None else None,
+            never.splitlines() if never is not None else None,
         )
     return _bible_card(request, "Saved.")
 
@@ -442,6 +459,25 @@ async def draw_character_sheet(request: Request, character_id: str):
         return _bible_card(request, f"{character.name}: Gemini failed: {exc}", error=True)
     bible.charge(tokens)
     name = bible.add_sheet(character_id, png)
+    return _bible_card(request, f"{character.name}: drew {name}. Approve it to use it on pages.")
+
+
+@app.post("/api/v1/bible/characters/{character_id}/details", response_class=HTMLResponse)
+async def draw_character_details(request: Request, character_id: str):
+    """Draw close-ups of a character's details from their approved sheet (~30 s)."""
+    with _known_character():
+        b = bible.load()
+        character = b.character(character_id)
+        images = [bible.image_path(character_id, n).read_bytes() for n in character.images]
+    if not character.sheet:
+        return _bible_card(request, f"{character.name}: Approve a character sheet first.", True)
+    sheet = bible.sheet_path(character_id, character.sheet).read_bytes()
+    try:
+        png, tokens = await run_in_threadpool(draw_detail_sheet, character, sheet, images, b)
+    except Exception as exc:  # Gemini errors vary; show them instead of a 500
+        return _bible_card(request, f"{character.name}: Gemini failed: {exc}", error=True)
+    bible.charge(tokens)
+    name = bible.add_sheet(character_id, png, kind="detail")
     return _bible_card(request, f"{character.name}: drew {name}. Approve it to use it on pages.")
 
 

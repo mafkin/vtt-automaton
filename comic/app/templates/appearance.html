@@ -3,7 +3,11 @@
     <textarea name="appearance" rows="2" class="w-full bg-slate-800 text-white p-2 rounded">{{ appearance if appearance is defined else c.appearance }}</textarea>
 </label>
 <label class="block">
-    <span class="text-sm text-slate-400">Must-haves (one per line; the page drawer is told to keep these, e.g. "red headband")</span>
+    <span class="text-sm text-slate-400">Must-haves (one per line, exact about shape, colour and position, e.g. "blue heater shield with three gold towers")</span>
     <textarea name="traits" rows="3" class="w-full bg-slate-800 text-white p-2 rounded">{{ (traits if traits is defined else c.traits) | join('\n') }}</textarea>
+</label>
+<label class="block">
+    <span class="text-sm text-slate-400">Never (one per line; what the page drawer must not give this character, e.g. "a tabard", "a cross on the helm")</span>
+    <textarea name="never" rows="2" class="w-full bg-slate-800 text-white p-2 rounded">{{ c.never | join('\n') }}</textarea>
 </label>
 {% if note %}<p class="text-sm {{ 'text-red-400' if error else 'text-amber-400' }}">{{ note }}</p>{% endif %}

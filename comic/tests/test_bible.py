@@ -156,3 +156,42 @@ def test_new_fields_have_defaults_for_old_bibles(bible_dir):
     b = bible.load()
     assert b.characters[0].traits == [] and b.characters[0].sheet is None
     assert b.style.page_look and b.style.anchor is None and b.tokens_used == 0
+
+
+# --- round 2: never list, detail sheets, references -------------------------------------------
+
+
+def test_never_list_is_saved_and_kept_when_not_sent():
+    ch = bible.add_character("Pentik")
+    bible.update_character(ch.id, "Pentik", [], "", traits=["great helm"], never=["tabard", " "])
+    assert bible.load().character(ch.id).never == ["tabard"]
+    bible.update_character(ch.id, "Pentik", [], "")  # a form without the field keeps it
+    assert bible.load().character(ch.id).never == ["tabard"]
+
+
+def test_detail_sheets_share_the_counter_and_are_approved_separately():
+    ch = bible.add_character("Pentik")
+    full = bible.add_sheet(ch.id, png(colour="blue"))
+    detail = bible.add_sheet(ch.id, png(colour="green"), kind="detail")
+    assert (full, detail) == ("sheet_1.png", "detail_2.png")
+    bible.approve_sheet(ch.id, full)
+    bible.approve_sheet(ch.id, detail)
+    c = bible.load().character(ch.id)
+    assert (c.sheet, c.detail) == (full, detail)
+    bible.delete_sheet(ch.id, detail)
+    c = bible.load().character(ch.id)
+    assert (c.sheet, c.detail) == (full, None)
+
+
+def test_references_are_the_sheet_then_the_details():
+    ch = bible.add_character("Pentik")
+    assert bible.references(bible.load().character(ch.id)) == []
+    bible.add_image(ch.id, png(colour="red"))
+    [(label, _)] = bible.references(bible.load().character(ch.id))
+    assert label == "reference image"
+    bible.approve_sheet(ch.id, bible.add_sheet(ch.id, png(colour="blue")))
+    bible.approve_sheet(ch.id, bible.add_sheet(ch.id, png(colour="green"), kind="detail"))
+    refs = bible.references(bible.load().character(ch.id))
+    assert [label for label, _ in refs] == ["full-body sheet", "close-ups of details"]
+    colours = [Image.open(io.BytesIO(data)).getpixel((0, 0)) for _, data in refs]
+    assert colours == [(0, 0, 255), (0, 128, 0)]
