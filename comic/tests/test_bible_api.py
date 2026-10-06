@@ -26,7 +26,7 @@ def test_the_bible_card_renders_empty(client):
     html = client.get("/api/v1/bible").text
     assert 'name="setting"' in html and "Finnish" in html
     assert "No characters yet" in html
-    assert "only the character" in html  # upload advice from the IP-Adapter spike
+    assert "only the character" in html  # other people in a reference picture leak into pages
 
 
 def test_campaign_fields_are_saved_and_escaped(client):

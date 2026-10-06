@@ -36,7 +36,7 @@ class Character(BaseModel):
     id: str
     name: str
     aliases: list[str] = Field(default_factory=list)
-    # Short visual description added to every panel this character is in (SDXL: keep it short).
+    # Short visual description given to the script writer and the page drawer, with the images.
     appearance: str = ""
     images: list[str] = Field(default_factory=list)
 
