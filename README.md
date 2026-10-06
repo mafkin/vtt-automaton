@@ -69,6 +69,25 @@ session asks the rules arbiter, and the ruling appears in Foundry.
 
 Tests: `cd discord-bot && npm ci && npm test`, `cd stt-worker && uv run pytest`.
 
+## Comic generation (experimental)
+
+Turns a finished session's transcript into comic panels: Gemini writes a beat sheet and panel
+scripts, ComfyUI renders each panel with SDXL on the GPU, and speech bubbles are drawn on top.
+The worker borrows the GPU by stopping the speech-to-text container and starting it again
+afterwards, so it only runs for sessions that have ended.
+
+To enable it on the server:
+
+1. `cp comic/.env.example comic/.env` and set `GEMINI_API_KEY`.
+2. Put an SDXL checkpoint at `data/comfyui/models/checkpoints/sdxl.safetensors`.
+3. Add `comic` to `COMPOSE_PROFILES` in `.env` (e.g. `COMPOSE_PROFILES=transcription,comic`;
+   the setup script keeps it), then `docker compose up -d --build`.
+4. Open `http://127.0.0.1:8771/dashboard` on the server, or run
+   `python3 scripts/trigger_comic.py [session-id]`.
+
+Panels land in `data/comfyui/output/` (`*_lettered.png` has the bubbles). Page assembly and
+delivery to Foundry/Discord aren't built yet. Tests: `cd comic && uv run pytest`.
+
 ## Foundry module
 
 `foundry-module/pf2e-ai-arbiter`. Install on Molten from the manifest URL

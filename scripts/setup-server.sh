@@ -91,6 +91,10 @@ if [[ "$answer" =~ ^[yYkK] ]]; then
 else
   PROFILES=""
 fi
+# Comic generation is set up by hand (comic/.env); keep it enabled if it was.
+if [[ "$(env_get COMPOSE_PROFILES "$ROOT_ENV")" == *comic* ]]; then
+  PROFILES="${PROFILES:+$PROFILES,}comic"
+fi
 
 umask 077  # the env files hold secrets: readable by this user only
 cat > "$ROOT_ENV" <<ENV
@@ -109,7 +113,7 @@ VTT_MAX_RULING_CHARS=3000
 VTT_WAKE_WORDS=$(env_get VTT_WAKE_WORDS "$BACKEND_ENV" | grep . || echo Nethys)
 VTT_RULES_REFRESH_HOURS=24
 ENV
-if [[ "$PROFILES" == transcription ]]; then
+if [[ "$PROFILES" == *transcription* ]]; then
   cat > "$BOT_ENV" <<ENV
 DISCORD_TOKEN=$DISCORD_TOKEN
 DISCORD_GUILD_ID=$GUILD_ID
@@ -183,7 +187,7 @@ else
 fi
 rm -f /tmp/vtt-ruling.json
 
-if [[ "$PROFILES" == transcription ]]; then
+if [[ "$PROFILES" == *transcription* ]]; then
   say "Transcription"
   bot_ok=""
   for _ in $(seq 1 30); do

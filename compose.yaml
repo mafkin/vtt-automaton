@@ -1,6 +1,7 @@
 # Home-server deployment.
-# The "transcription" profile adds the Discord bot and the GPU speech-to-text worker; enable it
-# with COMPOSE_PROFILES=transcription in .env (scripts/setup-server.sh does this).
+# Profiles (COMPOSE_PROFILES in .env; scripts/setup-server.sh keeps it up to date):
+#   transcription: the Discord bot and the GPU speech-to-text worker
+#   comic:         comic generation from session transcripts (ComfyUI on the same GPU)
 services:
   backend:
     build: ./backend
@@ -27,9 +28,14 @@ services:
       - backend
     restart: unless-stopped
 
+  # --- transcription ---------------------------------------------------------------------
+
   stt-worker:
     profiles: [transcription]
     build: ./stt-worker
+    # Fixed name: the comic worker stops and starts this container to borrow the GPU, and the
+    # docker-proxy only allows that for exactly this name.
+    container_name: vtt-stt-worker
     env_file: ./stt-worker/.env
     environment:
       STT_BACKEND_URL: http://backend:8765
@@ -60,6 +66,80 @@ services:
     depends_on:
       - backend
       - stt-worker
+    restart: unless-stopped
+
+  # --- comic generation ------------------------------------------------------------------
+  # Runs only between sessions: the worker stops vtt-stt-worker while ComfyUI renders and
+  # starts it again afterwards; live sessions are refused.
+
+  redis:
+    profiles: [comic]
+    image: redis:7-alpine # job queue for the comic worker
+    restart: unless-stopped
+
+  comfyui:
+    profiles: [comic]
+    build: ./comic/comfyui
+    volumes:
+      # Put the SDXL checkpoint at data/comfyui/models/checkpoints/sdxl.safetensors
+      - ./data/comfyui/models:/app/models
+      - ./data/comfyui/output:/app/output
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  docker-proxy:
+    profiles: [comic]
+    # Read-only socket proxy: the comic services may list containers (dashboard) and start or
+    # stop vtt-stt-worker (GPU handover), nothing else.
+    image: wollomatic/socket-proxy:1
+    environment:
+      - SP_ALLOW_GET=^/containers/json$|^/containers/vtt-stt-worker/json$
+      - SP_ALLOW_POST=^/containers/vtt-stt-worker/(start|stop)$
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+  comic-api:
+    profiles: [comic]
+    build: ./comic
+    command: uvicorn app.api:app --host 0.0.0.0 --port 8771
+    env_file: ./comic/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      # Reads data/sessions.db. Not mounted read-only: SQLite readers of a WAL database still
+      # need to write its shared-memory file.
+      - ./data:/data
+    # Dashboard at http://127.0.0.1:8771/dashboard, on the server only.
+    ports:
+      - "127.0.0.1:8771:8771"
+    depends_on:
+      - backend
+      - redis
+    restart: unless-stopped
+
+  comic-worker:
+    profiles: [comic]
+    build: ./comic
+    command: arq app.worker.WorkerSettings
+    env_file: ./comic/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      COMFYUI_URL: http://comfyui:8188
+      DOCKER_PROXY_URL: http://docker-proxy:2375
+    volumes:
+      - ./data:/data
+      - ./data/comfyui/output:/comfy_output
+    depends_on:
+      - backend
+      - redis
+      - docker-proxy
     restart: unless-stopped
 
 volumes:

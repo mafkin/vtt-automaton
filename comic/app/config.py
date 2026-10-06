@@ -1,0 +1,29 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    """Configuration from environment variables (no prefix), e.g. GEMINI_API_KEY."""
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    redis_url: str = "redis://redis:6379/0"
+    backend_url: str = "http://backend:8765"
+    comfyui_url: str = "http://comfyui:8188"
+    docker_proxy_url: str = "http://docker-proxy:2375"
+
+    # The speech-to-text container that holds the GPU between sessions. compose.yaml gives it
+    # this fixed name. Empty = no handover (transcription not installed).
+    stt_container_name: str = "vtt-stt-worker"
+
+    sessions_db_path: str = "/data/sessions.db"
+    comfy_output_dir: str = "/comfy_output"
+    jobs_dir: str = "/data/jobs"
+
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.1-pro-high"
+
+    # A whole comic (8-10 pages x 3-5 panels, tens of seconds per panel) takes well over an hour.
+    job_timeout_seconds: int = 4 * 3600
+
+
+settings = Settings()
