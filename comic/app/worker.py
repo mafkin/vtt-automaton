@@ -10,7 +10,7 @@ from app.sessions import any_live, get_session
 log = logging.getLogger(__name__)
 
 
-async def generate_comic(ctx, session_id: str) -> None:
+async def generate_comic(ctx, session_id: str, test: bool = False) -> None:
     session = get_session(session_id)
     if session is None or session.live:
         # Checked again here: the session may have been restarted since the job was queued.
@@ -22,9 +22,9 @@ async def generate_comic(ctx, session_id: str) -> None:
         # Another session is recording: stopping STT would cut it off.
         log.error("Not generating a comic for %s: a session is recording", session_id)
         return
-    log.info("Starting comic generation for session %s", session_id)
+    log.info("Starting %s for session %s", "a test comic" if test else "a comic", session_id)
     try:
-        await run_pipeline(session_id)
+        await run_pipeline(session_id, test)
         log.info("Finished comic generation for session %s", session_id)
     except Exception:
         log.exception("Comic generation failed for session %s", session_id)

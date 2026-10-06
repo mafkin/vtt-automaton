@@ -42,17 +42,25 @@ class PageDetail(BaseModel):
     panels: list[Panel]
 
 
-def generate_beat_sheet(transcript: str) -> BeatSheet:
-    logger.info("Starting LLM Pass 1: Beat Sheet")
-    client = genai.Client(api_key=settings.gemini_api_key)
+# Page range (min, max) of a production comic, and of a quick test run from the dashboard.
+FULL_PAGES = (8, 10)
+TEST_PAGES = (1, 2)
 
-    prompt = f"""
-    You are an expert comic book writer. Read the following TTRPG transcript and outline a comic book issue of 8-10 pages.
+
+def beat_sheet_prompt(transcript: str, pages: tuple[int, int]) -> str:
+    return f"""
+    You are an expert comic book writer. Read the following TTRPG transcript and outline a comic book issue of {pages[0]}-{pages[1]} pages.
     Each page should have 3 to 5 distinct narrative beats. Focus on the most important actions and dialogues.
     
     Transcript:
     {transcript}
     """
+
+
+def generate_beat_sheet(transcript: str, pages: tuple[int, int] = FULL_PAGES) -> BeatSheet:
+    logger.info("Starting LLM Pass 1: Beat Sheet")
+    client = genai.Client(api_key=settings.gemini_api_key)
+    prompt = beat_sheet_prompt(transcript, pages)
 
     response = client.models.generate_content(
         model=settings.gemini_model,

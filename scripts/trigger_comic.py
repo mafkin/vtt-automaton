@@ -24,8 +24,8 @@ def get_latest_session():
         
     return dict(row)
 
-def trigger_comic(session_id):
-    url = f"{API_URL}/{session_id}"
+def trigger_comic(session_id, test=False):
+    url = f"{API_URL}/{session_id}" + ("?test=true" if test else "")
     print(f"Triggering comic generation for session '{session_id}' at {url}...")
     try:
         req = urllib.request.Request(url, method="POST")
@@ -36,8 +36,12 @@ def trigger_comic(session_id):
         print(f"Failed to trigger API: {e}")
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        session_id = sys.argv[1]
+    # Usage: trigger_comic.py [--test] [session-id]   (--test: a 1-2 page test run)
+    args = sys.argv[1:]
+    test = "--test" in args
+    args = [a for a in args if a != "--test"]
+    if args:
+        session_id = args[0]
         print(f"Using provided session ID: {session_id}")
     else:
         print("No session ID provided, looking up the most recent session...")
@@ -46,4 +50,4 @@ if __name__ == "__main__":
         label = session["label"] or "Unnamed Session"
         print(f"Found latest session: '{label}' (ID: {session_id})")
         
-    trigger_comic(session_id)
+    trigger_comic(session_id, test)

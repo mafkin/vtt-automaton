@@ -120,11 +120,16 @@ async def get_picker() -> str:
         f"{datetime.fromtimestamp(c.started_at):%-d.%-m.%Y} – {c.segments} lines</option>"
         for c in choices
     )
-    button = (
-        "<button type='submit' class='bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 "
-        "rounded transition disabled:bg-slate-600 disabled:cursor-not-allowed'"
-        + (" disabled" if blocked else "")
-        + ">Generate comic</button>"
+    disabled = " disabled" if blocked else ""
+    style = (
+        "text-white px-4 py-2 rounded transition disabled:bg-slate-600 disabled:cursor-not-allowed"
+    )
+    buttons = (
+        f"<button type='submit' class='bg-blue-600 hover:bg-blue-500 {style}'{disabled}>"
+        "Generate comic (8–10 pages)</button>"
+        # htmx sends the clicked button's name/value with the form.
+        f"<button type='submit' name='mode' value='test' "
+        f"class='bg-slate-500 hover:bg-slate-400 {style}'{disabled}>Test run (1–2 pages)</button>"
     )
     reason = f"<span class='text-amber-400'>{escape(blocked)}</span>" if blocked else ""
     return (
@@ -134,7 +139,7 @@ async def get_picker() -> str:
         "hx-trigger='load, change' hx-target='#transcript-preview' "
         "class='w-full bg-slate-700 text-white p-2 rounded'>"
         f"{options}</select>"
-        f"<div class='flex items-center gap-4'>{button}{reason}"
+        f"<div class='flex flex-wrap items-center gap-4'>{buttons}{reason}"
         "<span id='generate-result'></span></div></form>"
         "<pre id='transcript-preview' class='mt-4 text-sm text-slate-300 whitespace-pre-wrap "
         "bg-slate-900 p-3 rounded'></pre>"
@@ -150,7 +155,7 @@ async def get_transcript_preview(session_id: str) -> str:
     return escape("\n".join(lines[:PREVIEW_LINES]) + more)
 
 
-async def _queue_comic(request: Request, session_id: str) -> bool:
+async def _queue_comic(request: Request, session_id: str, test: bool) -> bool:
     """Queue a comic for a finished session. Returns False if it is already queued/running."""
     session = get_session(session_id)
     if session is None:
@@ -167,7 +172,7 @@ async def _queue_comic(request: Request, session_id: str) -> bool:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="A session is recording")
     # One job per session at a time: arq ignores a job id that is already queued or running.
     job = await request.app.state.queue.enqueue_job(
-        "generate_comic", session_id, _job_id=f"comic:{session_id}"
+        "generate_comic", session_id, test, _job_id=f"comic:{session_id}"
     )
     return job is not None
 
@@ -177,19 +182,26 @@ async def generate_from_dashboard(request: Request) -> str:
     # htmx posts the form URL-encoded; parsed here to avoid a python-multipart dependency.
     form = parse_qs((await request.body()).decode())
     session_id = (form.get("session_id") or [""])[0]
+    test = (form.get("mode") or [""])[0] == "test"
     try:
-        queued = await _queue_comic(request, session_id)
+        queued = await _queue_comic(request, session_id, test)
     except HTTPException as exc:
         return f"<span class='text-red-400 font-bold'>{escape(str(exc.detail))}</span>"
+    kind = "Test run (1–2 pages)" if test else "Comic (8–10 pages)"
     message = (
-        "Queued – comic mode starts after the script is written."
+        f"{kind} queued – comic mode starts after the script is written."
         if queued
-        else ("Already queued or running.")
+        else "Already queued or running."
     )
     return f"<span class='text-green-400 font-bold'>{message}</span>"
 
 
 @app.post("/api/v1/comic/{session_id}", status_code=status.HTTP_202_ACCEPTED)
-async def trigger_comic_generation(session_id: str, request: Request):
-    queued = await _queue_comic(request, session_id)
-    return {"status": "accepted" if queued else "already_queued", "session_id": session_id}
+async def trigger_comic_generation(session_id: str, request: Request, test: bool = False):
+    """Queue a comic; ?test=true makes a 1-2 page test run."""
+    queued = await _queue_comic(request, session_id, test)
+    return {
+        "status": "accepted" if queued else "already_queued",
+        "session_id": session_id,
+        "test": test,
+    }

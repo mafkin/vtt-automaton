@@ -17,20 +17,21 @@ def test_worker_settings_fit_a_long_single_gpu_job():
 async def test_worker_refuses_live_and_unknown_sessions(no_live_sessions, monkeypatch):
     ran = []
 
-    async def fake_pipeline(session_id):
-        ran.append(session_id)
+    async def fake_pipeline(session_id, test=False):
+        ran.append((session_id, test))
 
     monkeypatch.setattr(worker, "run_pipeline", fake_pipeline)
     await worker.generate_comic({}, "nope")
     await worker.generate_comic({}, "ended1")
-    assert ran == ["ended1"]
+    await worker.generate_comic({}, "ended1", True)
+    assert ran == [("ended1", False), ("ended1", True)]
 
 
 async def test_worker_refuses_while_any_session_is_live(sessions_db, monkeypatch):
     # ended1 is finished, but live1 is recording: stopping STT now would cut tonight's game.
     ran = []
 
-    async def fake_pipeline(session_id):
+    async def fake_pipeline(session_id, test=False):
         ran.append(session_id)
 
     monkeypatch.setattr(worker, "run_pipeline", fake_pipeline)

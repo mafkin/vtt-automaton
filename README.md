@@ -89,7 +89,8 @@ To enable it on the server:
    (`stat -c %g /var/run/docker.sock`; the setup script fills it in), then
    `docker compose up -d --build`.
 4. Open `http://127.0.0.1:8771/dashboard` on the server, pick a finished session's transcript
-   and press **Generate comic**, or run `python3 scripts/trigger_comic.py [session-id]`.
+   and press **Generate comic** (8–10 pages) or **Test run** (1–2 pages), or run
+   `python3 scripts/trigger_comic.py [--test] [session-id]`.
 
 Panels land in `data/comfyui/output/` (`*_lettered.png` has the bubbles). Page assembly and
 delivery to Foundry/Discord aren't built yet. Tests: `cd comic && uv run pytest`.

@@ -38,7 +38,7 @@ def test_ended_session_is_queued_once(idle_client):
     client = idle_client
     r = client.post("/api/v1/comic/ended1")
     assert r.status_code == 202 and r.json()["status"] == "accepted"
-    assert client.app.state.queue.jobs == {"comic:ended1": ("generate_comic", "ended1")}
+    assert client.app.state.queue.jobs == {"comic:ended1": ("generate_comic", "ended1", False)}
     assert client.post("/api/v1/comic/ended1").json()["status"] == "already_queued"
 
 
@@ -62,6 +62,24 @@ def test_a_running_comic_blocks_another(idle_client, comic_lock):
     assert idle_client.app.state.queue.jobs == {}
 
 
+def test_a_test_run_can_be_requested(idle_client):
+    r = idle_client.post("/api/v1/comic/ended1?test=true")
+    assert r.status_code == 202
+    assert idle_client.app.state.queue.jobs == {"comic:ended1": ("generate_comic", "ended1", True)}
+
+
+def test_dashboard_buttons_queue_a_full_or_a_test_run(idle_client):
+    form = {"Content-Type": "application/x-www-form-urlencoded"}
+    idle_client.post("/api/v1/dashboard/generate", content="session_id=ended1", headers=form)
+    assert idle_client.app.state.queue.jobs["comic:ended1"] == ("generate_comic", "ended1", False)
+
+    idle_client.app.state.queue.jobs.clear()
+    body = "session_id=ended1&mode=test"
+    html = idle_client.post("/api/v1/dashboard/generate", content=body, headers=form).text
+    assert idle_client.app.state.queue.jobs["comic:ended1"] == ("generate_comic", "ended1", True)
+    assert "Test run" in html
+
+
 def test_unknown_session(idle_client):
     assert idle_client.post("/api/v1/comic/nope").status_code == 404
 
@@ -79,11 +97,13 @@ def test_picker_lists_finished_transcripts_and_can_generate(idle_client):
     assert "Session &lt;b&gt;12&lt;/b&gt;" in html and "2 lines" in html
     assert "live1" not in html
     assert "hx-post" in html and " disabled>" not in html
+    assert "Generate comic (8–10 pages)" in html
+    assert "name='mode' value='test'" in html and "Test run (1–2 pages)" in html
 
 
 def test_picker_is_disabled_while_a_session_is_live(client):
     html = client.get("/api/v1/dashboard/picker").text
-    assert " disabled>" in html and "Session live" in html
+    assert html.count(" disabled>") == 2 and "Session live" in html
 
 
 def test_picker_is_disabled_during_a_comic(idle_client, comic_lock):
