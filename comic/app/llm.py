@@ -40,7 +40,14 @@ class Lettering(BaseModel):
 def _client() -> genai.Client:
     """Keep the result in a variable for the whole call: the client closes its connection when
     it is garbage-collected, so "_client().models.generate_content(...)" fails."""
-    return genai.Client(api_key=settings.gemini_api_key)
+    # Retry overload and server errors ("503 UNAVAILABLE: high demand" is common for the image
+    # model). Failed requests produce no tokens, so retries don't touch the budget.
+    retry = types.HttpRetryOptions(
+        attempts=4, initial_delay=5, max_delay=60, http_status_codes=[429, 500, 502, 503, 504]
+    )
+    return genai.Client(
+        api_key=settings.gemini_api_key, http_options=types.HttpOptions(retry_options=retry)
+    )
 
 
 def _tokens(response) -> int:

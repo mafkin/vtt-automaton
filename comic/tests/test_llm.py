@@ -95,7 +95,7 @@ def test_the_gemini_client_stays_alive_during_the_call(monkeypatch):
             return Response()
 
     class FakeClient:
-        def __init__(self, api_key):
+        def __init__(self, api_key, http_options=None):
             self.state = {"closed": False}
             self.models = Models(self)
             # The Models only holds the state, not the client (as in the real SDK).
@@ -145,3 +145,19 @@ def test_sheet_prompt_asks_for_views_in_the_comic_style_without_text():
 def test_description_draft_asks_for_traits_too():
     p = describe_prompt("Rintaro", "")
     assert "traits" in p and "pose" in p
+
+
+def test_the_client_retries_overload_errors(monkeypatch):
+    # A "503 UNAVAILABLE: high demand" from Gemini failed a whole drawing round on the server.
+    from app import llm
+
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, api_key, http_options=None):
+            seen["options"] = http_options
+
+    monkeypatch.setattr(llm.genai, "Client", FakeClient)
+    llm._client()
+    retry = seen["options"].retry_options
+    assert retry.attempts >= 3 and {429, 503} <= set(retry.http_status_codes)
