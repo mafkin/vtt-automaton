@@ -15,7 +15,7 @@ import {
 } from "@discordjs/voice";
 import type { BackendClient, SttClient } from "./clients.js";
 import type { Config } from "./config.js";
-import { text } from "./messages.js";
+import { sessionStartError, text } from "./messages.js";
 import { Recorder } from "./recorder.js";
 import type { UserStore } from "./store.js";
 
@@ -111,7 +111,7 @@ export class TranscriptionBot {
       session = await this.backend.startSession(interaction.options.getString("label"));
     } catch (error) {
       connection.destroy();
-      await interaction.editReply(text.backendError((error as Error).message));
+      await interaction.editReply(sessionStartError(error));
       return;
     }
 
