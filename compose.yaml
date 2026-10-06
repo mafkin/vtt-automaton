@@ -1,7 +1,7 @@
 # Home-server deployment.
 # Profiles (COMPOSE_PROFILES in .env; scripts/setup-server.sh keeps it up to date):
 #   transcription: the Discord bot and the GPU speech-to-text worker
-#   comic:         comic generation from session transcripts (ComfyUI on the same GPU)
+#   comic:         comics from session transcripts, drawn by Gemini (dashboard on :8771)
 
 # Fixed project name, whatever the checkout folder is called: container names and the
 # dashboard's container list (comic/app/config.py: compose_project) depend on it.
@@ -38,8 +38,7 @@ services:
   stt-worker:
     profiles: [transcription]
     build: ./stt-worker
-    # Fixed name: the comic worker stops and starts this container to borrow the GPU, and the
-    # docker-proxy only allows that for exactly this name.
+    # Fixed name, so it's easy to find in logs and docker commands.
     container_name: vtt-stt-worker
     env_file: ./stt-worker/.env
     environment:
@@ -74,51 +73,23 @@ services:
     restart: unless-stopped
 
   # --- comic generation ------------------------------------------------------------------
-  # Runs only between sessions: the worker stops vtt-stt-worker while ComfyUI renders and
-  # starts it again afterwards; live sessions are refused.
+  # Comics are drawn by Gemini (no local GPU use); the dashboard is at :8771/dashboard.
 
   redis:
     profiles: [comic]
     image: redis:7-alpine # job queue for the comic worker
     restart: unless-stopped
 
-  comfyui:
-    profiles: [comic]
-    build: ./comic/comfyui
-    # Runs only during a comic: comic-worker starts it, and stops it afterwards to free the GPU
-    # for STT (and stops it at worker startup if compose up started it). The docker-proxy only
-    # allows that for exactly this name.
-    container_name: vtt-comfyui
-    # Forward docker stop's SIGTERM so ComfyUI exits cleanly instead of being killed after 10 s
-    # (Python as PID 1 ignores SIGTERM).
-    init: true
-    volumes:
-      # Put the SDXL checkpoint at data/comfyui/models/checkpoints/sdxl.safetensors
-      - ./data/comfyui/models:/app/models
-      - ./data/comfyui/output:/app/output
-      # Comic bible reference images, for IP-Adapter (edited on the dashboard).
-      - ./data/comic/characters:/app/input/characters:ro
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    restart: "no"
-
   docker-proxy:
     profiles: [comic]
-    # Socket proxy: the comic services may list containers (dashboard) and start or stop
-    # vtt-stt-worker and vtt-comfyui (GPU handover), nothing else.
+    # Read-only socket proxy: the dashboard lists this stack's containers, nothing else.
     image: wollomatic/socket-proxy:1
     environment:
-      - SP_ALLOW_GET=^/containers/json$|^/containers/(vtt-stt-worker|vtt-comfyui)/json$
-      - SP_ALLOW_POST=^/containers/(vtt-stt-worker|vtt-comfyui)/(start|stop)$
-      # Listen on the compose network and accept only the comic services (the defaults,
+      - SP_ALLOW_GET=^/containers/json$
+      # Listen on the compose network and accept only the dashboard (the defaults,
       # 127.0.0.1, are unreachable from other containers).
       - SP_LISTENIP=0.0.0.0
-      - SP_ALLOWFROM=comic-api,comic-worker
+      - SP_ALLOWFROM=comic-api
     # The image runs as nobody; it needs the host's docker group to open the socket.
     # Check with: stat -c %g /var/run/docker.sock
     group_add:
@@ -135,8 +106,8 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
     volumes:
-      # Reads data/sessions.db. Not mounted read-only: SQLite readers of a WAL database still
-      # need to write its shared-memory file.
+      # data/sessions.db (transcripts) and data/comic/ (bible, comics, limits). Not read-only:
+      # SQLite readers of a WAL database still need to write its shared-memory file.
       - ./data:/data
     # Dashboard at http://127.0.0.1:8771/dashboard, on the server only.
     ports:
@@ -144,6 +115,7 @@ services:
     depends_on:
       - backend
       - redis
+      - docker-proxy
     restart: unless-stopped
 
   comic-worker:
@@ -153,15 +125,10 @@ services:
     env_file: ./comic/.env
     environment:
       REDIS_URL: redis://redis:6379/0
-      COMFYUI_URL: http://comfyui:8188
-      DOCKER_PROXY_URL: http://docker-proxy:2375
     volumes:
       - ./data:/data
-      - ./data/comfyui/output:/comfy_output
     depends_on:
-      - backend
       - redis
-      - docker-proxy
     restart: unless-stopped
 
 volumes:

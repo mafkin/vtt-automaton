@@ -23,19 +23,15 @@ jobs:
             COMPOSE_PROFILES="$profiles" docker compose config --services
             echo "::endgroup::"
           done
-      - name: GPU handover names match
-        # The comic worker stops STT and starts/stops ComfyUI by name through docker-proxy;
-        # compose, the proxy allow-list and the worker's settings must agree.
+      - name: Comic services
+        # Comics are drawn by Gemini: no local renderer, and the Docker socket proxy only lets
+        # the dashboard list containers (read-only).
         run: |
           COMPOSE_PROFILES=transcription,comic docker compose config > resolved.yaml
-          grep -q "container_name: vtt-stt-worker" resolved.yaml
-          grep -q "container_name: vtt-comfyui" resolved.yaml
-          grep -qF "(vtt-stt-worker|vtt-comfyui)/(start|stop)" resolved.yaml
-          grep -q 'stt_container_name: str = "vtt-stt-worker"' comic/app/config.py
-          grep -q 'comfyui_container_name: str = "vtt-comfyui"' comic/app/config.py
+          # (Not "! grep": a negated command never fails a "set -e" script.)
+          if grep -q "comfyui" resolved.yaml; then echo "ComfyUI is still in compose"; exit 1; fi
+          if grep -q "SP_ALLOW_POST" resolved.yaml; then echo "docker-proxy allows POST"; exit 1; fi
+          grep -qF 'SP_ALLOW_GET: ^/containers/json$' resolved.yaml
           # The dashboard lists containers of this compose project only.
           grep -q "^name: vtt-automaton$" resolved.yaml
           grep -q 'compose_project: str = "vtt-automaton"' comic/app/config.py
-          # The worker sends IP-Adapter references as characters/<id>/<file> in ComfyUI's input.
-          grep -q "target: /app/input/characters" resolved.yaml
-          grep -q 'reference = f"characters/' comic/app/pipeline.py
