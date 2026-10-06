@@ -25,6 +25,11 @@ With the look check on and one automatic redraw, most pages were drawn twice. Th
 - **Recommended:** set automatic redraws to 0 (Limits card), or turn the look check off, and redraw bad pages by hand with an instruction.
 
 ### Contradicting inputs win over the spec
+Since the prompt-consistency change, every page prompt states one order of authority: character
+rules and sizes, then reference images, then panel descriptions, then style and previous page.
+The previous page no longer tells the drawer to keep characters "exactly as there", which used
+to carry a wrong drawing forward to every later page. Character sheets keep each character's
+natural stance instead of standing everyone upright.
 The drawer follows whatever it's given, and when inputs disagree the result is unpredictable:
 - The script said Pentik points "his sword" (miekka) while his spec said flail → he got a sword. Fixed: the script writer now gets must-haves and never lists, but **check older scripts by hand**.
 - A style reference page that shows an old version of a character brings that version back (Pentik's helm cross). **Only use a page as the style reference if every character on it is correct.**
@@ -56,6 +61,10 @@ The drawer corrects a misspelling in the script ("Väistykaa" → "Väistykää"
 The drawing budget is per comic (Limits card, default 80,000). It covers page images and their checks, and drawing stops before a page that would go over it. The whole test (three pages, four rounds plus sheets) used about 145,000 drawing tokens.
 
 ## Recommendations
+0. Set every character's **height** in the bible (cm). Reference images aren't to scale, so
+   each page and character sheet states the relative sizes of exactly the characters in it,
+   compared with the tallest one present (e.g. "the top of RINTARO's head reaches PENTIK's
+   knees"). Characters without a height are left out of the comparison.
 1. Aim for recognisable characters. Keep must-haves to big visible features; put exact insignia only where they matter.
 2. One draw per page (automatic redraws 0); redraw the few bad pages by hand with an instruction.
 3. Fewer characters per panel, and close-ups when a detail matters to the joke.

@@ -51,6 +51,9 @@ class Character(BaseModel):
     traits: list[str] = Field(default_factory=list)
     # What the page drawer must never give this character, e.g. "a tabard".
     never: list[str] = Field(default_factory=list)
+    # Standing height in cm. With heights set, every page states the relative sizes of the
+    # characters on it (app/scale.py).
+    height_cm: float | None = None
     images: list[str] = Field(default_factory=list)
     # Character sheets drawn in the comic's style; the approved one is the reference on pages.
     sheets: list[str] = Field(default_factory=list)
@@ -132,6 +135,7 @@ def update_character(
     appearance: str,
     traits: list[str] | None = None,
     never: list[str] | None = None,
+    height_cm: float | None | Literal["keep"] = "keep",
 ) -> None:
     bible = load()
     character = bible.character(character_id)
@@ -142,6 +146,8 @@ def update_character(
         character.traits = [t.strip() for t in traits if t.strip()]
     if never is not None:
         character.never = [t.strip() for t in never if t.strip()]
+    if height_cm != "keep":
+        character.height_cm = height_cm
     save(bible)
 
 

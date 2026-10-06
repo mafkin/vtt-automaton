@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from app.bible import Bible, Character
 from app.comics import Moment, ScriptPage
 from app.config import settings
+from app.scale import scale_line
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,8 @@ def bible_context(bible: Bible) -> str:
         for c in bible.characters:
             also = f" (also: {', '.join(c.aliases)})" if c.aliases else ""
             look = f": {c.appearance}" if c.appearance else ""
+            if c.height_cm:
+                look += f" (height {c.height_cm:g} cm)"
             spec = (f". Must have: {'; '.join(c.traits)}" if c.traits else "") + (
                 f". Never: {'; '.join(c.never)}" if c.never else ""
             )
@@ -127,7 +130,10 @@ For each page:
   stands where doing what, camera angle, the place's architecture as the setting describes it),
   and "balloons": 0-2 speech balloons, each with "speaker" and "text".
 Panel descriptions must agree with each character's must-haves and never list (weapons,
-armour, clothing): the page drawer follows them.
+armour, clothing): the page drawer follows them. Call a signature item by the exact words its
+must-have uses ("flail", "katana"), never by a generic or different word ("weapon", "sword",
+"miekka"). Don't describe a character's body differently from the campaign list: no standing
+upright for a creature that doesn't, no change of build, and keep the heights given.
 Write fresh, punchy dialogue in {bible.bubble_language}, at most ~10 words per balloon. Don't
 quote the transcript verbatim: it is full of recognition errors. Build each page to a payoff in
 its last panel."""
@@ -184,8 +190,10 @@ def draw_prompt(
     if previous:
         n += 1
         lines.append(
-            f"Reference image {n} is the PREVIOUS PAGE of this comic: keep every character's look,"
-            " the rendering style and the lettering exactly as there. Don't copy its panels or text."
+            f"Reference image {n} is the PREVIOUS PAGE of this comic: keep its rendering style and"
+            " lettering. For how characters look, their own reference images and rules above win:"
+            " where the previous page differs from them, follow the references, not the previous"
+            " page. Don't copy its panels or text."
         )
     panels = "\n".join(
         f"Panel {i}: {p.visual}\n  Balloons: "
@@ -193,13 +201,19 @@ def draw_prompt(
         for i, p in enumerate(page.panels, 1)
     )
     refs = "\n".join(lines)
+    sizes = scale_line(bible.match(page.characters))
+    if sizes:
+        refs += f"\nSizes (these win over the reference images, which aren't to scale): {sizes}"
     return f"""Draw one finished comic page with {len(page.panels)} panels, clean gutters, and the
 title "{page.title}" at the top, lettered exactly like that.
 Art style: {bible.style.positive}. Avoid: {bible.style.negative}.
 Page look: {bible.style.page_look}.
 Setting: {bible.setting}
-Characters: keep their designs exactly as in their reference images, the same in every panel.
-These details win over anything the panel descriptions say or imply.
+Characters: keep their designs exactly as in their reference images, the same in every panel:
+body shape and build, colours, and each signature item with exactly the number of parts and the
+material its rule states (one flail head stays one; a steel blade stays steel).
+Order of authority when inputs disagree: the character rules and sizes below, then each
+character's reference images, then the panel descriptions, then any style or previous page.
 {refs or "(no references)"}
 Letter every speech balloon exactly as written, character for character ({bible.bubble_language}),
 in clear comic lettering with the tail pointing at the speaker. Each balloon appears once.
@@ -253,11 +267,17 @@ def inspect_prompt(cast: list[Character], look_check: bool) -> str:
         "per balloon or box, exactly as written. Leave out sound effects and the page title."
     )
     specs = [c for c in cast if c.traits or c.never]
-    if look_check and specs:
+    sizes = scale_line(cast) if sum(1 for c in cast if c.height_cm) > 1 else ""
+    if look_check and (specs or sizes):
         rules = "\n".join(
             f"- {c.name}: must have {'; '.join(c.traits) or '-'}; never {'; '.join(c.never) or '-'}"
             for c in specs
         )
+        if sizes:
+            rules += (
+                f"\n- Sizes, where these characters stand side by side: {sizes} Report only a"
+                " clear break, e.g. a character drawn far taller than stated."
+            )
         prompt += f"""
 "looks": for these characters, list only clear breaks of their rules that you can see on the
 page, one entry per problem, naming the character. A detail that is not visible in a panel
@@ -319,10 +339,13 @@ def describe_prompt(name: str, notes: str = "") -> str:
         f"These are reference images of {name}, a character in a fantasy tabletop campaign. "
         '"appearance": how they look, for an image prompt: species, build, hair, face, clothing, '
         "colours and signature items; comma-separated phrases, at most 40 words, no names, no "
-        'story. "traits": the 3-6 details that make them recognisable at a glance and must '
-        'never change, each exact about shape, colour and position (e.g. "flat-topped '
-        'cylindrical great helm with a horizontal eye slit", "red headband with two trailing '
-        'ribbons", "spotted grey seal"). Leave out the pose, viewpoint, '
+        'story. Describe build and proportions (e.g. "short, stubby, round body"), but not height '
+        'in numbers: that is set separately. "traits": the 3-6 details that make them '
+        "recognisable at a glance and must never change, each exact about shape, colour, "
+        "material, number and position, naming each item precisely rather than generically "
+        '(e.g. "flat-topped cylindrical great helm with a horizontal eye slit", "flail: exactly '
+        'one spiked iron ball on one chain", "katana: one curved single-edged steel blade", '
+        '"spotted grey seal on flippers, never upright"). Leave out the pose, viewpoint, '
         "background and lighting of the images: the text is reused for every page the "
         "character appears in." + (f" Notes from the players: {notes}" if notes else "")
     )
@@ -348,11 +371,14 @@ def sheet_prompt(character: Character, bible: Bible) -> str:
     traits = "; ".join(character.traits)
     never = "; ".join(character.never)
     return f"""Draw a character model sheet of {character.name} for a comic: full body seen from
-the front, in three-quarter view and from the side, standing in a neutral pose, side by side
-on a plain light background. The same character in every view.
+the front, in three-quarter view and from the side, in their natural resting stance as the
+reference images show it (a creature that isn't upright stays on its belly, flippers or all
+fours; don't stretch or stand it up), side by side on a plain light background. The same
+character, at the same size, in every view.
 Look: {character.appearance or "as in the reference images"}.
 {f"Must have: {traits}." if traits else ""}
 {f"Never: {never}." if never else ""}
+{f"Size: {size}" if (size := scale_line([character])) else ""}
 Art style: {bible.style.positive}. Avoid: {bible.style.negative}.
 The reference images show this character; keep their design, but draw it in the art style
 above. No text, no labels, no other characters."""
@@ -384,7 +410,8 @@ def detail_sheet_prompt(character: Character, bible: Bible) -> str:
     return f"""Draw a detail sheet of {character.name} for a comic: large close-ups, side by side
 on a plain light background, of what makes this character recognisable: head or helm from the
 front and from the side, any emblem or crest on the chest, the shield face, the main weapon,
-signature items. Each detail big and sharp enough to copy exactly.
+signature items. Each detail big and sharp enough to copy exactly, with the same number of
+parts and the same materials as in the references (don't add heads, blades or decorations).
 The first image is the approved full-body sheet of {character.name}: the details must match it
 exactly. Any further images are the original references.
 {f"Must have: {traits}." if traits else ""}

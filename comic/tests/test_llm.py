@@ -128,7 +128,9 @@ def test_draw_prompt_lists_must_have_traits_and_page_look():
     p = draw_prompt(page(), bible, labelled(bible, ["full-body sheet"], ["reference image"]))
     assert "PENTIK must have: great helm; blue shield with three gold towers" in p
     assert "PENTIK never: a tabard; a cross on the helm" in p
-    assert "these details win over" in p.lower()
+    # The character rules outrank the panel descriptions.
+    authority = p[p.index("Order of authority") :]
+    assert authority.index("character rules") < authority.index("panel descriptions")
     assert "white balloons, black borders" in p
     assert "STYLE REFERENCE" not in p
 
@@ -214,7 +216,9 @@ def test_events_prompt_uses_speaker_tags_as_characters():
 
 def test_description_draft_asks_for_exact_must_haves():
     p = describe_prompt("Pentik", "")
-    assert "shape, colour and position" in p
+    assert "shape, colour, material, number and position" in p
+    assert "exactly one spiked iron ball" in p  # counts are spelled out
+    assert "not height in numbers" in p  # height has its own field
 
 
 def test_sheet_prompt_includes_the_never_list():
@@ -233,3 +237,74 @@ def test_the_script_writer_knows_each_characters_must_haves_and_never_list():
     assert "Pentik: great helm. Must have: flail. Never: a sword" in context
     p = script_prompt("1. Fight", [Moment(title="T")], bible)
     assert "Never: a sword" in p and "must-haves" in p.lower()
+
+
+def test_draw_prompt_states_sizes_of_the_characters_on_the_page():
+    bible = campaign()
+    bible.characters[0].height_cm = 185  # Pentik
+    bible.characters[1].height_cm = 60  # Rintaro, on the page as "Rin"
+    bible.characters.append(Character(id="kal", name="Käl", height_cm=160))  # not on the page
+    p = draw_prompt(page(), bible, [])
+    assert "Sizes (these win over the reference images" in p
+    assert "RINTARO (60 cm) is 32% of PENTIK's height" in p
+    assert "KÄL" not in p
+
+
+def test_draw_prompt_without_heights_has_no_size_line():
+    assert "Sizes" not in draw_prompt(page(), campaign(), [])
+
+
+def test_sheet_prompt_and_bible_context_carry_the_height():
+    bible = campaign()
+    rintaro = bible.characters[1]
+    rintaro.height_cm = 60
+    assert "Size: RINTARO is 60 cm tall" in sheet_prompt(rintaro, bible)
+    assert "Rintaro (also: Rin): seal (height 60 cm)" in bible_context(bible)
+
+
+def test_previous_page_never_outranks_the_references():
+    bible = campaign()
+    cast = labelled(bible, ["full-body sheet"], ["full-body sheet"])
+    p = draw_prompt(page(), bible, cast, previous=True)
+    previous = p[p.index("PREVIOUS PAGE") :].split("\n")[0]
+    assert "keep every character's look" not in p
+    assert "follow the references, not the previous page" in previous
+    authority = p[p.index("Order of authority") :]
+    assert authority.index("reference images") < authority.index("previous page")
+
+
+def test_draw_prompt_holds_counts_and_materials():
+    p = draw_prompt(page(), campaign(), [])
+    assert "exactly the number of parts" in p and "material" in p
+
+
+def test_sheet_prompt_keeps_the_natural_stance():
+    bible = campaign()
+    p = sheet_prompt(bible.characters[1], bible)
+    assert "standing in a neutral pose" not in p
+    assert "natural resting stance" in p and "don't stretch or stand it up" in p
+
+
+def test_detail_sheet_keeps_the_number_of_parts():
+    bible = campaign()
+    p = detail_sheet_prompt(bible.characters[0], bible)
+    assert "same number of" in p and "don't add heads" in p
+
+
+def test_script_writer_names_items_exactly_and_keeps_bodies():
+    p = script_prompt("events", [Moment(title="x")], campaign())
+    assert 'never by a generic or different word ("weapon", "sword"' in p
+    assert "keep the heights given" in p
+
+
+def test_look_check_checks_sizes_only_with_two_heights():
+    bible = campaign()
+    bible.characters[0].height_cm = 185
+    bible.characters[1].height_cm = 60
+    p = inspect_prompt(bible.characters, look_check=True)
+    assert "Sizes, where these characters stand side by side" in p
+    assert "RINTARO (60 cm) is 32% of PENTIK's height" in p
+    bible.characters[0].height_cm = None
+    assert "Sizes" not in inspect_prompt(bible.characters, look_check=True)
+    bible.characters[0].height_cm = 185
+    assert "Sizes" not in inspect_prompt(bible.characters, look_check=False)

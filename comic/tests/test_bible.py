@@ -195,3 +195,12 @@ def test_references_are_the_sheet_then_the_details():
     assert [label for label, _ in refs] == ["full-body sheet", "close-ups of details"]
     colours = [Image.open(io.BytesIO(data)).getpixel((0, 0)) for _, data in refs]
     assert colours == [(0, 0, 255), (0, 128, 0)]
+
+
+def test_height_is_kept_unless_given():
+    ch = bible.add_character("Rintaro")
+    bible.update_character(ch.id, "Rintaro", [], "", height_cm=60)
+    bible.update_character(ch.id, "Rintaro", [], "")  # no height in the call: unchanged
+    assert bible.load().character(ch.id).height_cm == 60
+    bible.update_character(ch.id, "Rintaro", [], "", height_cm=None)  # cleared
+    assert bible.load().character(ch.id).height_cm is None
