@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 
 from app.comfy import generate_comfy_prompt, queue_prompt, wait_for_completion
 from app.config import settings
@@ -55,6 +56,20 @@ async def render_panel(prefix: str, panel):
         if not success:
             logger.error(f"Panel {panel.panel_number} failed to render.")
         else:
-            # ComfyUI appends a counter: <prefix>_00001_.png
-            img_path = os.path.join(settings.comfy_output_dir, f"{prefix}_00001_.png")
-            layout_bubbles(img_path, panel.speech_bubbles)
+            img_path = latest_output(prefix)
+            if img_path is None:
+                logger.error(f"Rendered {prefix} but found no output file")
+            else:
+                layout_bubbles(img_path, panel.speech_bubbles)
+
+
+def latest_output(prefix: str) -> str | None:
+    """The newest render of a prefix: ComfyUI never overwrites, it counts up
+    (<prefix>_00001_.png, then _00002_ when the same session is rendered again)."""
+    pattern = re.compile(rf"{re.escape(prefix)}_(\d+)_\.png")
+    counters = [
+        (int(m.group(1)), name)
+        for name in os.listdir(settings.comfy_output_dir)
+        if (m := pattern.fullmatch(name))
+    ]
+    return os.path.join(settings.comfy_output_dir, max(counters)[1]) if counters else None

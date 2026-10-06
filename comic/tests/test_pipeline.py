@@ -60,3 +60,32 @@ async def test_a_test_run_is_capped_at_2_pages_and_named_apart(fake_pipeline):
     await pipeline.run_pipeline("s1", test=True)
     assert fake_pipeline["pages"] == TEST_PAGES
     assert fake_pipeline["rendered"] == ["comic_s1_test_p1_pan1", "comic_s1_test_p2_pan1"]
+
+
+async def test_a_rerun_letters_the_new_panel_not_the_old_one(tmp_path, monkeypatch):
+    # ComfyUI never overwrites: a second render of the same prefix is saved as _00002_.
+    from PIL import Image
+
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "comfy_output_dir", str(tmp_path))
+    for counter, colour in (("00001", "red"), ("00002", "blue")):
+        Image.new("RGB", (64, 64), colour).save(tmp_path / f"comic_s1_p1_pan1_{counter}_.png")
+    Image.new("RGB", (64, 64), "red").save(tmp_path / "comic_s1_p1_pan1_00001__lettered.png")
+    # A longer prefix that starts the same must not be picked up.
+    Image.new("RGB", (64, 64), "red").save(tmp_path / "comic_s1_p1_pan10_00009_.png")
+
+    async def queued(prompt):
+        return {"prompt_id": "p"}, "c"
+
+    async def done(prompt_id, client_id):
+        return True
+
+    lettered = []
+    monkeypatch.setattr(pipeline, "queue_prompt", queued)
+    monkeypatch.setattr(pipeline, "wait_for_completion", done)
+    monkeypatch.setattr(pipeline, "layout_bubbles", lambda path, bubbles: lettered.append(path))
+
+    panel = Panel(panel_number=1, image_prompt="x", character_focus=[], speech_bubbles=["Hei"])
+    await pipeline.render_panel("comic_s1_p1_pan1", panel)
+    assert lettered == [str(tmp_path / "comic_s1_p1_pan1_00002_.png")]
