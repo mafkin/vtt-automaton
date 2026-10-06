@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-3.8-flash"
     # Draws the comic pages (with the characters' reference images).
     gemini_image_model: str = "gemini-3-pro-image"
+    # Output size of pages and sheets ("1K", "2K", "4K"; empty: the model's default, 1K). For
+    # gemini-3-pro-image 1K and 2K cost the same tokens; 2K gives small details twice the pixels.
+    gemini_image_size: str = "2K"
 
     # One comic step may take this long; drawing 10 pages with redraws is ~10 minutes.
     job_timeout_seconds: int = 3600

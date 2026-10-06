@@ -166,11 +166,12 @@ async def test_draw_uses_the_approved_sheet_and_the_style_anchor(gemini):
     c.script = [a_page()]
     comics.save(c)
     await pipeline.draw(c.id)
-    assert gemini["cast_png"] == [sheet] and gemini["cast_labels"] == [["full-body sheet"]]
+    assert gemini["cast_png"][0] == sheet
+    assert gemini["cast_labels"] == [["full-body sheet", bible_store.ORIGINAL_LABEL]]
     assert gemini["anchor"] == bible_store.anchor_image()
     c = comics.load(c.id)
     info = c.pages[0].info["page_1_v1.png"]
-    assert info.refs == {"Pentik": "sheet_1.png"} and info.anchor is True
+    assert info.refs == {"Pentik": "sheet_1.png + 1 image"} and info.anchor is True
     assert info.check == "ok" and info.tokens == 1800 + 1300 and info.round
 
 
@@ -182,7 +183,7 @@ async def test_each_draw_is_its_own_round(gemini):
     await pipeline.draw(c.id, page_index=1, extra="kilpi")
     rounds = comics.rounds(comics.load(c.id))
     assert len(rounds) == 2 and rounds[1].pages == [None, "page_2_v2.png"]
-    assert rounds[0].label == "Pentik: image"
+    assert rounds[0].label == "Pentik: 1 image"
 
 
 async def test_each_page_sees_the_previous_page_of_the_round(gemini):
@@ -215,9 +216,10 @@ async def test_the_detail_sheet_is_sent_after_the_full_body_sheet(gemini):
     c.script = [a_page()]
     comics.save(c)
     await pipeline.draw(c.id)
-    assert gemini["cast_labels"] == [["full-body sheet", "close-ups of details"]]
+    labels = ["full-body sheet", "close-ups of details", bible_store.ORIGINAL_LABEL]
+    assert gemini["cast_labels"] == [labels]
     info = comics.load(c.id).pages[0].info["page_1_v1.png"]
-    assert info.refs == {"Pentik": "sheet_1.png + detail_2.png"}
+    assert info.refs == {"Pentik": "sheet_1.png + detail_2.png + 1 image"}
 
 
 async def test_a_look_problem_is_redrawn_once_and_shown(gemini):
@@ -259,3 +261,26 @@ async def test_the_automatic_redraw_is_told_what_to_fix(gemini):
     assert "Fix these mistakes of the previous attempt" in second
     assert "Pentik: shield has no gold castle" in second
     assert "extra: Kirjaston ja Restov." in second
+
+
+async def test_a_character_named_only_in_a_panel_gets_references(gemini):
+    rintaro = bible_store.add_character("Rintaro")
+    bible_store.add_image(rintaro.id, png("yellow"))
+    page = a_page()
+    page.panels[0].visual = "Rintaro bows to Pentik"
+    c = comics.create("ended1", "S")
+    c.script = [page]
+    comics.save(c)
+    await pipeline.draw(c.id)
+    assert gemini["draw"] == [("Sivu", ["Pentik", "Rintaro"], "")]
+
+
+async def test_own_images_on_pages_follow_the_limit(gemini):
+    comics.save_limits(Limits(page_reference_images=0))
+    bible_store.approve_sheet("pentik", bible_store.add_sheet("pentik", png("green")))
+    c = comics.create("ended1", "S")
+    c.script = [a_page()]
+    comics.save(c)
+    await pipeline.draw(c.id)
+    assert gemini["cast_labels"] == [["full-body sheet"]]
+    assert comics.load(c.id).pages[0].info["page_1_v1.png"].refs == {"Pentik": "sheet_1.png"}

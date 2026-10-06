@@ -249,3 +249,12 @@ def test_preview_shows_which_speaker_tags_are_in_the_bible(client):
     bible.delete_character("valeros")
     html = client.get("/api/v1/dashboard/transcript?session_id=ended1").text
     assert "✗ Valeros" in html and "not in the bible" in html
+
+
+def test_limits_card_sets_own_images_per_page(client):
+    assert 'name="page_reference_images" value="1"' in client.get("/api/v1/limits").text
+    form = {"token_budget_per_comic": "3000", "max_auto_redraws_per_page": "0"}
+    client.post("/api/v1/limits", data={**form, "page_reference_images": "2"})
+    assert comics.load_limits().page_reference_images == 2
+    html = client.post("/api/v1/limits", data={**form, "page_reference_images": "7"}).text
+    assert "must be" in html and comics.load_limits().page_reference_images == 2

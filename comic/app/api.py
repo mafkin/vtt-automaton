@@ -284,15 +284,21 @@ async def save_limits(
     token_budget_per_comic: int = Form(...),
     max_auto_redraws_per_page: int = Form(...),
     look_check: str | None = Form(None),  # a checkbox: absent when unticked
+    page_reference_images: int = Form(1),
 ):
     limits, message = comics.load_limits(), "Saved."
-    if token_budget_per_comic < 0 or not 0 <= max_auto_redraws_per_page <= 3:
-        message = "The budget must be 0 or more, and automatic redraws 0-3."
+    if (
+        token_budget_per_comic < 0
+        or not 0 <= max_auto_redraws_per_page <= 3
+        or not 0 <= page_reference_images <= 3
+    ):
+        message = "The budget must be 0 or more; automatic redraws and own images 0-3."
     else:
         limits = comics.Limits(
             token_budget_per_comic=token_budget_per_comic,
             max_auto_redraws_per_page=max_auto_redraws_per_page,
             look_check=look_check is not None,
+            page_reference_images=page_reference_images,
         )
         comics.save_limits(limits)
     context = {"limits": limits, "message": message}
@@ -303,9 +309,13 @@ async def save_limits(
 
 
 def _bible_card(request: Request, message: str = "", error: bool = False) -> HTMLResponse:
-    return templates.TemplateResponse(
-        request, "bible.html", {"bible": bible.load(), "message": message, "error": error}
-    )
+    context = {
+        "bible": bible.load(),
+        "own_images": comics.load_limits().page_reference_images,
+        "message": message,
+        "error": error,
+    }
+    return templates.TemplateResponse(request, "bible.html", context)
 
 
 @app.get("/api/v1/bible", response_class=HTMLResponse)
@@ -409,6 +419,15 @@ async def get_image(character_id: str, name: str):
     with _known_character():
         path = bible.image_path(character_id, name)
     return FileResponse(path, media_type="image/png")
+
+
+@app.post(
+    "/api/v1/bible/characters/{character_id}/images/{name}/first", response_class=HTMLResponse
+)
+async def move_image_first(request: Request, character_id: str, name: str):
+    with _known_character():
+        bible.move_image_first(character_id, name)
+    return _bible_card(request, "Image moved first.")
 
 
 @app.post(

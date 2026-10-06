@@ -13,7 +13,7 @@ import unicodedata
 from pathlib import Path
 from typing import Literal
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 from app.config import settings
@@ -78,6 +78,15 @@ class Bible(BaseModel):
             if c.id == character_id:
                 return c
         raise KeyError(character_id)
+
+    def mentioned(self, text: str) -> list[Character]:
+        """The characters whose name or an alias appears in `text` as a word ("Pentik's" too)."""
+        found = []
+        for c in self.characters:
+            words = "|".join(re.escape(n) for n in (c.name, *c.aliases) if n.strip())
+            if words and re.search(rf"(?<!\w)(?:{words})(?:'s|’s)?(?!\w)", text, re.IGNORECASE):
+                found.append(c)
+        return found
 
     def match(self, names: list[str]) -> list[Character]:
         """The characters these names refer to (by name or alias, ignoring case), in order."""
@@ -158,8 +167,19 @@ def delete_character(character_id: str) -> None:
     shutil.rmtree(_character_dir(character_id), ignore_errors=True)
 
 
+def _flatten(image: Image.Image) -> Image.Image:
+    """RGB on white. A plain convert("RGB") turns a transparent background (character art cut
+    out of its background, a VTT token) black, which hides a dark character's outline."""
+    if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+        rgba = image.convert("RGBA")
+        white = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+        return Image.alpha_composite(white, rgba).convert("RGB")
+    return image.convert("RGB")
+
+
 def add_image(character_id: str, data: bytes) -> str:
-    """Store a reference image: re-encoded as PNG (drops metadata), longest side ≤1024 px."""
+    """Store a reference image: upright (phone photos carry their rotation in EXIF), on white
+    instead of transparent, re-encoded as PNG (drops metadata), longest side ≤1024 px."""
     bible = load()
     character = bible.character(character_id)
     if len(data) > MAX_UPLOAD_BYTES:
@@ -169,7 +189,7 @@ def add_image(character_id: str, data: bytes) -> str:
         image.load()
     except (UnidentifiedImageError, OSError) as exc:
         raise BibleError("File is not an image (use PNG, JPEG or WebP)") from exc
-    image = image.convert("RGB")
+    image = _flatten(ImageOps.exif_transpose(image))
     image.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))
     name = f"{secrets.token_hex(8)}.png"
     folder = _character_dir(character_id)
@@ -186,6 +206,16 @@ def image_path(character_id: str, name: str) -> Path:
     if not _IMAGE_NAME.fullmatch(name) or name not in character.images:
         raise KeyError(name)
     return _character_dir(character_id) / name
+
+
+def move_image_first(character_id: str, name: str) -> None:
+    """Make an image the first one: the first images are the ones sent with every page."""
+    image_path(character_id, name)
+    bible = load()
+    images = bible.character(character_id).images
+    images.remove(name)
+    images.insert(0, name)
+    save(bible)
 
 
 def delete_image(character_id: str, name: str) -> None:
@@ -241,26 +271,24 @@ def delete_sheet(character_id: str, name: str) -> None:
     path.unlink(missing_ok=True)
 
 
-def reference_image(character: Character) -> bytes | None:
-    """What the page drawer sees of a character: the approved sheet, else the first image."""
-    if character.sheet:
-        return sheet_path(character.id, character.sheet).read_bytes()
-    if character.images:
-        return image_path(character.id, character.images[0]).read_bytes()
-    return None
+ORIGINAL_LABEL = "original design reference: copy its design, not its drawing style"
 
 
-def references(character: Character) -> list[tuple[str, bytes]]:
-    """What the page drawer sees of a character, labelled: the full-body reference, then the
-    approved detail close-ups if any."""
+def references(character: Character, originals: int = 1) -> list[tuple[str, bytes]]:
+    """What the page drawer sees of a character, labelled: the approved full-body sheet and
+    detail close-ups, then the first `originals` uploaded images, the design as you gave it (a
+    drawn sheet can drift from it). Without an approved sheet, at least the first image."""
     refs: list[tuple[str, bytes]] = []
-    full = reference_image(character)
-    if full is not None:
-        refs.append(("full-body sheet" if character.sheet else "reference image", full))
+    if character.sheet:
+        refs.append(("full-body sheet", sheet_path(character.id, character.sheet).read_bytes()))
     if character.detail:
         refs.append(
             ("close-ups of details", sheet_path(character.id, character.detail).read_bytes())
         )
+    count = originals if character.sheet else max(originals, 1)
+    label = ORIGINAL_LABEL if character.sheet else "reference image"
+    for name in character.images[:count]:
+        refs.append((label, image_path(character.id, name).read_bytes()))
     return refs
 
 

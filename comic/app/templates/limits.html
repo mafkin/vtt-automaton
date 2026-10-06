@@ -7,6 +7,10 @@
         <span class="text-sm text-slate-400">Automatic redraws when lettering is wrong (0-3)</span>
         <input type="number" min="0" max="3" name="max_auto_redraws_per_page" value="{{ limits.max_auto_redraws_per_page }}" class="block bg-slate-700 text-white p-2 rounded">
     </label>
+    <label class="block">
+        <span class="text-sm text-slate-400">Own images per character sent with each page, besides approved sheets (0-3; each ~a few hundred tokens)</span>
+        <input type="number" min="0" max="3" name="page_reference_images" value="{{ limits.page_reference_images }}" class="block bg-slate-700 text-white p-2 rounded">
+    </label>
     <label class="flex items-center gap-2">
         <input type="checkbox" name="look_check" value="on" {% if limits.look_check %}checked{% endif %}>
         <span class="text-sm text-slate-400">Look check (characters vs. their must-haves/never; redraw on a clear miss)</span>

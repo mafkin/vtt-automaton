@@ -239,3 +239,18 @@ def test_height_is_set_from_the_form_shown_and_validated(client):
 
     client.post("/api/v1/bible/characters/rintaro", data={**form, "height": ""})  # cleared
     assert bible.load().characters[0].height_cm is None
+
+
+def test_images_on_pages_are_marked_and_can_be_moved_first(client):
+    client.post("/api/v1/bible/characters", data={"name": "Rintaro"})
+    files = [
+        ("files", ("a.png", png(), "image/png")),
+        ("files", ("b.png", png("blue"), "image/png")),
+    ]
+    client.post("/api/v1/bible/characters/rintaro/images", files=files)
+    first, second = bible.load().characters[0].images
+    html = client.get("/api/v1/bible").text
+    assert html.count(">on pages<") == 1 and f"/images/{second}/first" in html
+    assert f"/images/{first}/first" not in html  # already first
+    client.post(f"/api/v1/bible/characters/rintaro/images/{second}/first")
+    assert bible.load().characters[0].images == [second, first]

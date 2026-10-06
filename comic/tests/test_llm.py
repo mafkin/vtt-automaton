@@ -1,3 +1,7 @@
+import io
+
+from PIL import Image
+
 from app.bible import Bible, Character, Style
 from app.comics import Balloon, Moment, ScriptPage, ScriptPanel
 from app.llm import bible_context, draw_prompt, events_prompt, lettering_problems, script_prompt
@@ -244,7 +248,7 @@ def test_draw_prompt_states_sizes_of_the_characters_on_the_page():
     bible.characters[0].height_cm = 185  # Pentik
     bible.characters[1].height_cm = 60  # Rintaro, on the page as "Rin"
     bible.characters.append(Character(id="kal", name="Käl", height_cm=160))  # not on the page
-    p = draw_prompt(page(), bible, [])
+    p = draw_prompt(page(), bible, labelled(bible, [], []))
     assert "Sizes (these win over the reference images" in p
     assert "RINTARO (60 cm) is 32% of PENTIK's height" in p
     assert "KÄL" not in p
@@ -310,3 +314,107 @@ def test_look_check_checks_sizes_only_with_two_heights():
     assert "Sizes" not in inspect_prompt(bible.characters, look_check=True)
     bible.characters[0].height_cm = 185
     assert "Sizes" not in inspect_prompt(bible.characters, look_check=False)
+
+
+# --- who is on the page, per-panel identities, how images are sent ---------------------------
+
+from app.llm import page_cast  # noqa: E402
+
+
+def test_page_cast_adds_speakers_and_characters_named_in_panels():
+    bible = campaign()
+    bible.characters.append(Character(id="kal", name="Käl"))
+    p = page()
+    p.characters = ["Pentik"]  # the script writer forgot Rintaro and Käl
+    p.panels[1].visual = "Rintaro strikes while Käl ducks"
+    assert [c.id for c in page_cast(p, bible)] == ["pentik", "rintaro", "kal"]
+
+
+def test_each_panel_names_who_is_in_it_and_their_references():
+    bible = campaign()
+    p = page()
+    p.panels[1].balloons[0].speaker = "Rin"  # an alias as the speaker
+    cast = labelled(bible, ["full-body sheet", "close-ups of details"], ["reference image"])
+    text = draw_prompt(p, bible, cast)
+    panel1, panel2 = text.split("Panel 1:")[1].split("Panel 2:")
+    assert "In this panel: PENTIK (reference images 1-2)" in panel1
+    assert 'Balloons: PENTIK: "Ota tuo elävänä!"' in panel1
+    assert "In this panel: RINTARO (reference image 3)" in panel2
+    assert 'RINTARO: "Hups.' in panel2  # the alias became the name the references use
+    assert "unnamed extra" in text and "never a look-alike" in text
+
+
+def test_a_character_without_references_is_drawn_from_the_rules():
+    bible = campaign()
+    bible.characters[1].traits = ["spotted grey seal"]
+    text = draw_prompt(page(), bible, labelled(bible, ["full-body sheet"], []))
+    assert "RINTARO has no reference image: draw them from these rules" in text
+    assert "RINTARO must have: spotted grey seal" in text
+    assert "In this panel: RINTARO (no reference image: draw from the rules)" in text
+
+
+def test_the_script_writer_names_everyone_in_each_visual():
+    p = script_prompt("events", [Moment(title="x")], campaign())
+    assert "Name every player\n  character in a panel's visual" in p
+    assert "character_focus" not in p
+
+
+class Capture:
+    """A fake genai.Client that records the request and answers with one image."""
+
+    def __init__(self, seen):
+        self.seen = seen
+
+    def __call__(self, api_key, http_options=None):
+        seen = self.seen
+
+        class Models:
+            def generate_content(self, **kwargs):
+                seen.update(kwargs)
+                part = type("P", (), {"inline_data": type("D", (), {"data": b"img"})()})()
+                content = type("C", (), {"parts": [part]})()
+                return type(
+                    "R",
+                    (),
+                    {"candidates": [type("X", (), {"content": content})()], "usage_metadata": None},
+                )()
+
+        return type("Client", (), {"models": Models()})()
+
+
+def big_png(size=(3000, 2000)) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", size, "red").save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_draw_page_puts_each_label_next_to_its_image_and_asks_for_2k(monkeypatch):
+    from app import llm
+
+    seen = {}
+    monkeypatch.setattr(llm.genai, "Client", Capture(seen))
+    bible = campaign()
+    pentik, rintaro = bible.characters
+    cast = [(pentik, [("full-body sheet", big_png())]), (rintaro, [("reference image", big_png())])]
+    llm.draw_page(page(), bible, cast, previous=big_png())
+    contents = seen["contents"]
+    assert contents[0] == "Reference image 1: PENTIK (full-body sheet)"
+    assert contents[2] == "Reference image 2: RINTARO (reference image)"
+    assert contents[4] == "Reference image 3: PREVIOUS PAGE"
+    assert "Reference image 3 is the PREVIOUS PAGE" in contents[6]
+    image = contents[1].inline_data
+    assert image.mime_type == "image/jpeg"
+    assert max(Image.open(io.BytesIO(image.data)).size) == llm.INPUT_SIDE
+    assert seen["config"].image_config.image_size == "2K"
+    assert seen["config"].image_config.aspect_ratio == "3:4"
+
+
+def test_the_image_size_can_be_left_to_the_model(monkeypatch):
+    from app import llm
+
+    seen = {}
+    monkeypatch.setattr(llm.genai, "Client", Capture(seen))
+    monkeypatch.setattr(llm.settings, "gemini_image_size", "")
+    llm.draw_sheet(campaign().characters[1], [big_png((64, 64))], campaign())
+    assert seen["config"].image_config.image_size is None
+    assert seen["contents"][0] == "Reference image 1 of 1: Rintaro"
