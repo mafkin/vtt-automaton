@@ -132,8 +132,8 @@ For each page:
 Panel descriptions must agree with each character's must-haves and never list (weapons,
 armour, clothing): the page drawer follows them. Call a signature item by the exact words its
 must-have uses ("flail", "katana"), never by a generic or different word ("weapon", "sword",
-"miekka"). Don't describe a character's body differently from the campaign list: no standing
-upright for a creature that doesn't, no change of build, and keep the heights given.
+"miekka"). Don't describe a character's body differently from the campaign list: keep their
+posture (on two feet or on all fours), build and proportions, and the heights given.
 Write fresh, punchy dialogue in {bible.bubble_language}, at most ~10 words per balloon. Don't
 quote the transcript verbatim: it is full of recognition errors. Build each page to a payoff in
 its last panel."""
@@ -345,7 +345,7 @@ def describe_prompt(name: str, notes: str = "") -> str:
         "material, number and position, naming each item precisely rather than generically "
         '(e.g. "flat-topped cylindrical great helm with a horizontal eye slit", "flail: exactly '
         'one spiked iron ball on one chain", "katana: one curved single-edged steel blade", '
-        '"spotted grey seal on flippers, never upright"). Leave out the pose, viewpoint, '
+        '"anthropomorphic seal walking upright on two short feet"). Leave out the pose, viewpoint, '
         "background and lighting of the images: the text is reused for every page the "
         "character appears in." + (f" Notes from the players: {notes}" if notes else "")
     )
@@ -371,10 +371,10 @@ def sheet_prompt(character: Character, bible: Bible) -> str:
     traits = "; ".join(character.traits)
     never = "; ".join(character.never)
     return f"""Draw a character model sheet of {character.name} for a comic: full body seen from
-the front, in three-quarter view and from the side, in their natural resting stance as the
-reference images show it (a creature that isn't upright stays on its belly, flippers or all
-fours; don't stretch or stand it up), side by side on a plain light background. The same
-character, at the same size, in every view.
+the front, in three-quarter view and from the side, in their natural stance as the reference
+images show it (on two feet or on all fours, as they are), with the same proportions: short legs
+stay short and a stubby body stays stubby; don't stretch or slim it. Side by side on a plain
+light background. The same character, at the same size, in every view.
 Look: {character.appearance or "as in the reference images"}.
 {f"Must have: {traits}." if traits else ""}
 {f"Never: {never}." if never else ""}
