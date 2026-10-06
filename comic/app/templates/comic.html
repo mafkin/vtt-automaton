@@ -58,6 +58,12 @@
                 </a>
                 <div class="text-sm space-y-1">
                     <p class="{{ 'text-green-400' if state.check == 'ok' else 'text-amber-400' }}">Lettering: {{ state.check or "not checked" }}</p>
+                    <p class="{{ 'text-amber-400' if state.looks else 'text-green-400' }}">Looks: {{ state.looks or "ok" }}</p>
+                    <p>
+                        <button type="button" hx-post="/api/v1/comics/{{ c.id }}/pages/{{ state.current }}/anchor" hx-target="next span"
+                                class="bg-slate-600 hover:bg-slate-500 text-white px-2 py-1 rounded">Use as style reference</button>
+                        <span></span>
+                    </p>
                     {% if state.versions | length > 1 %}
                     <p class="text-slate-400">Earlier versions:
                         {% for v in state.versions[:-1] %}<a class="underline" href="/api/v1/comics/{{ c.id }}/pages/{{ v }}" target="_blank">{{ loop.index }}</a> {% endfor %}
@@ -75,6 +81,34 @@
             </div>
         </div>
         {% endfor %}
+        {% if rounds | length > 1 %}
+        <!-- Compare: one column per drawing round, so changes can be judged side by side -->
+        <details class="bg-slate-900 p-3 rounded" open>
+            <summary class="cursor-pointer text-white font-semibold">Compare drawing rounds</summary>
+            <div class="overflow-x-auto mt-3">
+                <table class="text-sm">
+                    <tr>
+                        <th></th>
+                        {% for r in rounds %}<th class="p-2 text-left align-bottom text-slate-300 font-normal max-w-xs">Round {{ loop.index }}<br><span class="text-slate-400">{{ r.label or "–" }}</span></th>{% endfor %}
+                    </tr>
+                    {% for page in c.script %}{% set i = loop.index0 %}
+                    <tr>
+                        <td class="p-2 align-top text-slate-300">Page {{ i + 1 }}</td>
+                        {% for r in rounds %}
+                        <td class="p-2 align-top">
+                            {% if r.pages[i] %}
+                            <a href="/api/v1/comics/{{ c.id }}/pages/{{ r.pages[i] }}" target="_blank">
+                                <img src="/api/v1/comics/{{ c.id }}/pages/{{ r.pages[i] }}" class="h-56 rounded border border-slate-600" alt="Page {{ i + 1 }}, round {{ loop.index }}">
+                            </a>
+                            {% endif %}
+                        </td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+        </details>
+        {% endif %}
         <div class="flex flex-wrap gap-2">
             <button type="submit" {% if busy %}disabled{% endif %} class="bg-slate-500 hover:bg-slate-400 text-white px-4 py-2 rounded">Save script</button>
             <button type="button" {% if busy %}disabled{% endif %}

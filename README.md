@@ -93,7 +93,31 @@ so they can be made while a session is recording.
 (`data/comic/bible.json`): the setting and tone, the art style and things to avoid, the
 language of the speech balloons, and the characters, with names and aliases as they appear in
 transcripts, a short appearance text and reference images. Reference images should show only
-the character; **Draft description from images** lets Gemini write the appearance text.
+the character; **Draft description from images** lets Gemini write the appearance text and
+the character's **must-haves** (details the page drawer is told never to change).
+
+**Consistency.** Three things keep characters and pages looking the same:
+- **Character sheets:** **Draw character sheet** draws the character in the comic's own style
+  (front, three-quarter and side view, plain background) from the reference images. Approve
+  one and every page uses it as the character's reference instead of the first image.
+- **Page look:** a fixed description of lettering, balloons, borders and page colour, added to
+  every page.
+- **Style reference:** **Use as style reference** under a drawn page you like sends that page
+  with every new page as the style to match (Comic Bible card: shown, and removable).
+- **Exact specs:** each character's must-haves (exact about shape, colour and position) and a
+  **never** list ("a tabard", "a cross on the helm") are given to the page drawer, and win over
+  the panel descriptions.
+- **Detail sheets:** **Draw detail sheet** (after a sheet is approved) draws large close-ups of
+  helm, emblem, shield and weapon; once approved it's sent with the sheet on every page.
+- **Continuity:** each page is drawn with the page before it, so looks and rendering carry over.
+- **Look check:** the same call that reads the lettering back also checks each character
+  against their must-haves and never list; a clear miss is redrawn like a lettering error
+  (Limits card: on by default).
+- **Speaker tags:** the transcript preview shows the session's `/link` characters with ✓ when
+  the bible knows them, ✗ when it doesn't (add the name or an alias).
+
+Each drawing records what it was made with; when a comic has been drawn more than once,
+**Compare drawing rounds** shows the rounds side by side, labelled with the references used.
 
 **Limits.** Drawing is what can run away, so a comic's page images and their lettering checks
 are charged to its token budget (Limits card, default 80,000 per comic; a page is about 5,500,
@@ -109,6 +133,8 @@ To enable it on the server:
    the setup script keeps it) and set `DOCKER_GID` to the group of `/var/run/docker.sock`
    (`stat -c %g /var/run/docker.sock`; the setup script fills it in; the dashboard's container
    list needs it), then `docker compose up -d --build`.
+
+Known issues, measured costs and recommendations from testing: [docs/COMIC-KNOWN-ISSUES.md](docs/COMIC-KNOWN-ISSUES.md).
 
 Tests: `cd comic && uv run pytest`.
 

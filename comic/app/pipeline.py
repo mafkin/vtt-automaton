@@ -8,13 +8,14 @@ an exhausted budget as "budget".
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 
 from app import bible as bible_store
 from app import comics
 from app.bible import Bible
-from app.comics import BudgetExceeded, Comic, Moment
-from app.llm import draw_page, extract_events, lettering_problems, read_lettering, write_script
+from app.comics import BudgetExceeded, Comic, Moment, VersionInfo
+from app.llm import draw_page, extract_events, inspect_page, lettering_problems, write_script
 from app.sessions import transcript as get_transcript
 
 logger = logging.getLogger(__name__)
@@ -75,32 +76,65 @@ async def draw(comic_id: str, page_index: int | None = None, extra: str = "") ->
 
     async def step(comic: Comic) -> str:
         bible = bible_store.load()
+        anchor = bible_store.anchor_image()
         indices = range(len(comic.script)) if page_index is None else [page_index]
+        round_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{'all' if page_index is None else page_index}"
         for i in indices:
-            await _draw_page(comic, i, bible, extra)
+            await _draw_page(comic, i, bible, extra, anchor, round_id)
         return "done"
 
     await _run(comic_id, "drawing", step)
 
 
-async def _draw_page(comic: Comic, index: int, bible: Bible, extra: str) -> None:
+async def _draw_page(
+    comic: Comic, index: int, bible: Bible, extra: str, anchor: bytes | None, round_id: str
+) -> None:
     page = comic.script[index]
-    cast = [
-        (c, bible_store.image_path(c.id, c.images[0]).read_bytes())
-        for c in bible.match(page.characters)
-        if c.images
-    ]
-    attempts = 1 + comics.load_limits().max_auto_redraws_per_page
-    for attempt in range(attempts):
+    characters = bible.match(page.characters)
+    # Each character's labelled references: the approved sheet (or first image), then details.
+    cast = [(c, refs) for c in characters if (refs := bible_store.references(c))]
+    refs = {c.name: " + ".join(filter(None, [c.sheet or "image", c.detail])) for c, _ in cast}
+    # Continuity: the page before this one as it is now (just drawn in this round, or current).
+    previous_name = comic.pages[index - 1].current if 0 < index <= len(comic.pages) else None
+    previous = comics.page_path(comic.id, previous_name).read_bytes() if previous_name else None
+    limits = comics.load_limits()
+    instruction = extra
+    for attempt in range(1 + limits.max_auto_redraws_per_page):
         comics.ensure_budget(comic, PAGE_ESTIMATE)
-        png, tokens = await asyncio.to_thread(draw_page, page, bible, cast, extra)
-        comics.charge(comic, tokens, "image")
-        comics.add_page_version(comic, index, png)
-        read, tokens = await asyncio.to_thread(read_lettering, png)
-        comics.charge(comic, tokens, "image")  # part of drawing: it decides on redraws
-        problems = lettering_problems(page, read)
-        comic.pages[index].check = "; ".join(problems) or "ok"
+        png, draw_tokens = await asyncio.to_thread(
+            draw_page, page, bible, cast, instruction, anchor, previous
+        )
+        comics.charge(comic, draw_tokens, "image")
+        info = VersionInfo(
+            round=round_id,
+            refs=refs,
+            anchor=anchor is not None,
+            previous=previous_name,
+            extra=extra,
+        )
+        name = comics.add_page_version(comic, index, png, info)
+        inspection, read_tokens = await asyncio.to_thread(
+            inspect_page, png, characters, limits.look_check
+        )
+        comics.charge(comic, read_tokens, "image")  # part of drawing: it decides on redraws
+        lettering = lettering_problems(page, inspection.texts)
+        looks = (
+            [f"{p.character}: {p.problem}" for p in inspection.looks] if limits.look_check else []
+        )
+        state = comic.pages[index]
+        state.check = "; ".join(lettering) or "ok"
+        state.looks = "; ".join(looks)
+        info.check, info.looks = state.check, state.looks
+        info.tokens = draw_tokens + read_tokens
+        state.info[name] = info
         comics.save(comic)
-        if not problems:
+        if not lettering and not looks:
             return
-        logger.info("Comic %s page %d attempt %d: %s", comic.id, index + 1, attempt + 1, problems)
+        # Redraw with what was wrong: re-rolling the same prompt brings the same mistakes back.
+        fixes = "; ".join(looks + lettering)
+        instruction = "\n".join(
+            part for part in (extra, f"Fix these mistakes of the previous attempt: {fixes}") if part
+        )
+        logger.info(
+            "Comic %s page %d attempt %d: %s", comic.id, index + 1, attempt + 1, lettering + looks
+        )

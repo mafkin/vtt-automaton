@@ -1,4 +1,6 @@
 <div id="bible" class="space-y-6">
+    <style>.htmx-indicator{display:none}.htmx-request .htmx-indicator,.htmx-request.htmx-indicator{display:inline}</style>
+    <p class="text-sm text-slate-400">Tokens spent on the bible (sheets, description drafts): {{ bible.tokens_used }}</p>
     {% if message %}
     <p class="{{ 'text-red-400' if error else 'text-green-400' }} font-bold">{{ message }}</p>
     {% endif %}
@@ -21,6 +23,10 @@
             <span class="text-sm text-slate-400">Avoid (negative prompt)</span>
             <input name="style_negative" value="{{ bible.style.negative }}" class="w-full bg-slate-700 text-white p-2 rounded">
         </label>
+        <label class="block">
+            <span class="text-sm text-slate-400">Page look (lettering, balloons, borders, page colour: the same on every page)</span>
+            <input name="style_page_look" value="{{ bible.style.page_look }}" class="w-full bg-slate-700 text-white p-2 rounded">
+        </label>
         <div class="flex flex-wrap items-end gap-4">
             <label class="block">
                 <span class="text-sm text-slate-400">Speech bubble language</span>
@@ -29,6 +35,23 @@
             <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded">Save campaign</button>
         </div>
     </form>
+
+    <!-- Style anchor: an approved page every new page should look like -->
+    <div class="space-y-2">
+        <h3 class="text-lg font-semibold text-white">Style reference</h3>
+        {% if bible.style.anchor %}
+        <div class="flex flex-wrap items-start gap-4">
+            <a href="/api/v1/bible/anchor" target="_blank"><img src="/api/v1/bible/anchor" class="h-48 rounded border border-slate-600" alt="Style reference"></a>
+            <div class="space-y-2 text-sm text-slate-400">
+                <p>Sent with every page: new pages match its drawing style, colours, lettering and borders.</p>
+                <button hx-post="/api/v1/bible/anchor/delete" hx-target="#bible" hx-swap="outerHTML"
+                        class="bg-red-700 hover:bg-red-600 text-white px-3 py-1 rounded">Remove</button>
+            </div>
+        </div>
+        {% else %}
+        <p class="text-sm text-slate-400">None. Use <b>Use as style reference</b> under a drawn page you like.</p>
+        {% endif %}
+    </div>
 
     <!-- Characters -->
     <div class="space-y-4">
@@ -69,6 +92,37 @@
                             class="absolute top-0 right-0 bg-red-700 text-white text-xs px-1 rounded" title="Remove image">✕</button>
                 </div>
                 {% endfor %}
+            </div>
+            <!-- Character sheets: drawn in the comic's style; the approved one is the reference on pages -->
+            <div class="space-y-2">
+                <div class="flex flex-wrap gap-3">
+                    {% for sh in c.sheets %}
+                    <div class="space-y-1">
+                        <a href="/api/v1/bible/characters/{{ c.id }}/sheets/{{ sh }}" target="_blank">
+                            <img src="/api/v1/bible/characters/{{ c.id }}/sheets/{{ sh }}" class="h-28 rounded border {{ 'border-green-400 border-2' if sh in (c.sheet, c.detail) else 'border-slate-600' }}" alt="{{ c.name }} sheet">
+                        </a>
+                        <div class="flex gap-1 text-xs">
+                            {% if sh == c.sheet or sh == c.detail %}<span class="text-green-400 font-bold">Approved</span>{% else %}
+                            <button hx-post="/api/v1/bible/characters/{{ c.id }}/sheets/{{ sh }}/approve" hx-target="#bible" hx-swap="outerHTML"
+                                    class="bg-green-700 hover:bg-green-600 text-white px-2 rounded">Approve</button>{% endif %}
+                            <button hx-post="/api/v1/bible/characters/{{ c.id }}/sheets/{{ sh }}/delete" hx-target="#bible" hx-swap="outerHTML"
+                                    class="bg-red-700 hover:bg-red-600 text-white px-2 rounded">Delete</button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <button hx-post="/api/v1/bible/characters/{{ c.id }}/sheets" hx-target="#bible" hx-swap="outerHTML"
+                        hx-indicator="#sheet-busy-{{ c.id }}" hx-disabled-elt="this"
+                        class="bg-slate-500 hover:bg-slate-400 text-white px-3 py-1 rounded">Draw character sheet</button>
+                {% if c.sheet %}
+                <button hx-post="/api/v1/bible/characters/{{ c.id }}/details" hx-target="#bible" hx-swap="outerHTML"
+                        hx-indicator="#sheet-busy-{{ c.id }}" hx-disabled-elt="this"
+                        class="bg-slate-500 hover:bg-slate-400 text-white px-3 py-1 rounded">Draw detail sheet</button>
+                {% endif %}
+                <span id="sheet-busy-{{ c.id }}" class="htmx-indicator text-amber-400 text-sm">Drawing… (about 30 s)</span>
+                <span class="text-sm text-slate-400">
+                    {{ "Pages use the approved sheet" if c.sheet else "Pages use the first image until a sheet is approved" }}{{ " and detail sheet." if c.detail else "." }}
+                </span>
             </div>
             <form hx-post="/api/v1/bible/characters/{{ c.id }}/images" hx-encoding="multipart/form-data"
                   hx-target="#bible" hx-swap="outerHTML" class="flex flex-wrap items-center gap-2">

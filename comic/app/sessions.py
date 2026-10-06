@@ -61,6 +61,17 @@ def ended_sessions_with_transcripts() -> list[TranscriptChoice]:
     return [TranscriptChoice(**dict(r)) for r in rows]
 
 
+def character_tags(session_id: str) -> list[tuple[str, int]]:
+    """The characters players spoke as (speaker tags from /link), with their line counts."""
+    with closing(_connect()) as conn:
+        rows = conn.execute(
+            "SELECT character, COUNT(*) AS n FROM segments WHERE session_id = ? "
+            "AND character IS NOT NULL AND character != '' GROUP BY character ORDER BY n DESC",
+            (session_id,),
+        ).fetchall()
+    return [(r["character"], r["n"]) for r in rows]
+
+
 def transcript(session_id: str) -> str:
     with closing(_connect()) as conn:
         rows = conn.execute(

@@ -7,6 +7,10 @@
         <span class="text-sm text-slate-400">Automatic redraws when lettering is wrong (0-3)</span>
         <input type="number" min="0" max="3" name="max_auto_redraws_per_page" value="{{ limits.max_auto_redraws_per_page }}" class="block bg-slate-700 text-white p-2 rounded">
     </label>
+    <label class="flex items-center gap-2">
+        <input type="checkbox" name="look_check" value="on" {% if limits.look_check %}checked{% endif %}>
+        <span class="text-sm text-slate-400">Look check (characters vs. their must-haves/never; redraw on a clear miss)</span>
+    </label>
     <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded">Save limits</button>
     {% if message %}<span class="{{ 'text-green-400' if message == 'Saved.' else 'text-red-400' }} font-bold">{{ message }}</span>{% endif %}
 </form>

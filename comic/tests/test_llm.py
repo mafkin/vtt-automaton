@@ -1,6 +1,6 @@
 from app.bible import Bible, Character, Style
 from app.comics import Balloon, Moment, ScriptPage, ScriptPanel
-from app.llm import draw_prompt, events_prompt, lettering_problems, script_prompt
+from app.llm import bible_context, draw_prompt, events_prompt, lettering_problems, script_prompt
 
 
 def campaign() -> Bible:
@@ -48,8 +48,14 @@ def test_script_prompt_has_moments_language_and_page_per_moment():
     assert "one page per moment" in p.lower() and "Finnish" in p
 
 
+def labelled(bible, *labels_per_character):
+    """The cast as the pipeline passes it: (character, [reference labels])."""
+    chars = bible.match(page().characters)
+    return [(c, list(labels)) for c, labels in zip(chars, labels_per_character, strict=True)]
+
+
 def test_draw_prompt_letters_exactly_without_captions():
-    cast = campaign().match(page().characters)
+    cast = labelled(campaign(), ["reference image"], ["reference image"])
     p = draw_prompt(page(), campaign(), cast, extra="Pentik holds his shield")
     assert '"Ei-kuolettava kuulustelu"' in p and "Ota tuo elävänä!" in p
     assert "no captions" in p.lower() and "ink comic on parchment" in p and "photo" in p
@@ -95,7 +101,7 @@ def test_the_gemini_client_stays_alive_during_the_call(monkeypatch):
             return Response()
 
     class FakeClient:
-        def __init__(self, api_key):
+        def __init__(self, api_key, http_options=None):
             self.state = {"closed": False}
             self.models = Models(self)
             # The Models only holds the state, not the client (as in the real SDK).
@@ -107,3 +113,123 @@ def test_the_gemini_client_stays_alive_during_the_call(monkeypatch):
     monkeypatch.setattr(llm.genai, "Client", FakeClient)
     result, tokens = llm.extract_events("t", campaign())
     assert result.events == "e" and tokens == 0
+
+
+# --- consistency: traits, page look, style anchor, character sheets ---------------------------
+
+from app.llm import describe_prompt, sheet_prompt  # noqa: E402
+
+
+def test_draw_prompt_lists_must_have_traits_and_page_look():
+    bible = campaign()
+    bible.characters[0].traits = ["great helm", "blue shield with three gold towers"]
+    bible.style.page_look = "white balloons, black borders"
+    bible.characters[0].never = ["a tabard", "a cross on the helm"]
+    p = draw_prompt(page(), bible, labelled(bible, ["full-body sheet"], ["reference image"]))
+    assert "PENTIK must have: great helm; blue shield with three gold towers" in p
+    assert "PENTIK never: a tabard; a cross on the helm" in p
+    assert "these details win over" in p.lower()
+    assert "white balloons, black borders" in p
+    assert "STYLE REFERENCE" not in p
+
+
+def test_reference_images_are_numbered_per_label_then_anchor_then_previous_page():
+    bible = campaign()
+    cast = labelled(bible, ["full-body sheet", "close-ups of details"], ["reference image"])
+    p = draw_prompt(page(), bible, cast, anchor=True, previous=True)
+    assert "Reference image 1 is PENTIK (full-body sheet)" in p
+    assert "Reference image 2 is PENTIK (close-ups of details)" in p
+    assert "Reference image 3 is RINTARO (reference image)" in p
+    assert "Reference image 4 is a STYLE REFERENCE page" in p
+    assert "Reference image 5 is the PREVIOUS PAGE" in p
+    assert "don't copy its characters" in p.lower()
+
+
+def test_without_anchor_or_previous_page_neither_is_mentioned():
+    bible = campaign()
+    p = draw_prompt(page(), bible, labelled(bible, ["reference image"], ["reference image"]))
+    assert "STYLE REFERENCE" not in p and "PREVIOUS PAGE" not in p
+
+
+def test_sheet_prompt_asks_for_views_in_the_comic_style_without_text():
+    bible = campaign()
+    rintaro = bible.characters[1]
+    rintaro.traits = ["spotted grey seal", "red headband"]
+    p = sheet_prompt(rintaro, bible)
+    assert "Rintaro" in p and "spotted grey seal; red headband" in p and "seal" in p
+    assert "ink comic on parchment" in p
+    assert "front" in p and "side" in p and "no text" in p.lower()
+
+
+def test_description_draft_asks_for_traits_too():
+    p = describe_prompt("Rintaro", "")
+    assert "traits" in p and "pose" in p
+
+
+def test_the_client_retries_overload_errors(monkeypatch):
+    # A "503 UNAVAILABLE: high demand" from Gemini failed a whole drawing round on the server.
+    from app import llm
+
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, api_key, http_options=None):
+            seen["options"] = http_options
+
+    monkeypatch.setattr(llm.genai, "Client", FakeClient)
+    llm._client()
+    retry = seen["options"].retry_options
+    assert retry.attempts >= 3 and {429, 503} <= set(retry.http_status_codes)
+
+
+from app.llm import detail_sheet_prompt, inspect_prompt  # noqa: E402
+
+
+def test_detail_sheet_prompt_asks_for_close_ups_of_the_must_haves():
+    bible = campaign()
+    pentik = bible.characters[0]
+    pentik.traits = ["flat-topped great helm", "blue shield with three gold towers"]
+    pentik.never = ["a tabard"]
+    p = detail_sheet_prompt(pentik, bible)
+    assert "close-up" in p.lower() and "flat-topped great helm" in p and "a tabard" in p
+    assert "first image is the approved full-body sheet" in p.lower()
+    assert "no text" in p.lower()
+
+
+def test_inspection_asks_for_lettering_and_only_clear_look_problems():
+    bible = campaign()
+    bible.characters[0].traits = ["blue shield with three gold towers"]
+    bible.characters[0].never = ["a tabard"]
+    p = inspect_prompt(bible.match(["Pentik"]), look_check=True)
+    assert "speech balloon" in p and "blue shield with three gold towers" in p and "a tabard" in p
+    assert "not visible" in p.lower()
+    off = inspect_prompt(bible.match(["Pentik"]), look_check=False)
+    assert "speech balloon" in off and "a tabard" not in off
+
+
+def test_events_prompt_uses_speaker_tags_as_characters():
+    p = events_prompt("Aino (Pentik): Hyökkään!", campaign())
+    assert "Speaker (Character)" in p
+
+
+def test_description_draft_asks_for_exact_must_haves():
+    p = describe_prompt("Pentik", "")
+    assert "shape, colour and position" in p
+
+
+def test_sheet_prompt_includes_the_never_list():
+    bible = campaign()
+    pentik = bible.characters[0]
+    pentik.never = ["a tabard or cloth over the breastplate"]
+    assert "Never: a tabard or cloth over the breastplate" in sheet_prompt(pentik, bible)
+
+
+def test_the_script_writer_knows_each_characters_must_haves_and_never_list():
+    # The test comic's script had Pentik "pointing his sword" while his spec says flail.
+    bible = campaign()
+    bible.characters[0].traits = ["flail"]
+    bible.characters[0].never = ["a sword"]
+    context = bible_context(bible)
+    assert "Pentik: great helm. Must have: flail. Never: a sword" in context
+    p = script_prompt("1. Fight", [Moment(title="T")], bible)
+    assert "Never: a sword" in p and "must-haves" in p.lower()

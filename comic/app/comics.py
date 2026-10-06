@@ -35,8 +35,11 @@ class Limits(BaseModel):
     # Tokens one comic may spend on drawing: page images and their lettering checks. Reading
     # the transcript and writing the script are single calls; they're counted, not budgeted.
     token_budget_per_comic: int = 80_000
-    # Automatic redraws of a page whose lettering doesn't match the script.
+    # Automatic redraws of a page whose lettering or looks don't pass the check.
     max_auto_redraws_per_page: int = 1
+    # Check each page's characters against their must-haves and never lists (same call as the
+    # lettering check, so it costs little).
+    look_check: bool = True
 
 
 class Moment(BaseModel):
@@ -61,10 +64,37 @@ class ScriptPage(BaseModel):
     panels: list[ScriptPanel]
 
 
+class VersionInfo(BaseModel):
+    """What one drawing of a page was made with, for comparing versions side by side."""
+
+    round: str = ""
+    at: float = Field(default_factory=time.time)
+    # Character name -> the reference used: a sheet file name, or "image".
+    refs: dict[str, str] = Field(default_factory=dict)
+    anchor: bool = False
+    # The previous page sent along for continuity (file name), if any.
+    previous: str | None = None
+    extra: str = ""
+    tokens: int = 0
+    check: str = ""
+    looks: str = ""
+
+
+class Round(BaseModel):
+    """One drawing round ("Draw all" or a single redraw): the last try of each page in it."""
+
+    id: str
+    label: str
+    pages: list[str | None]
+
+
 class PageState(BaseModel):
     versions: list[str] = Field(default_factory=list)
+    info: dict[str, VersionInfo] = Field(default_factory=dict)
     # Result of reading the lettering back: "ok", or what didn't match.
     check: str = ""
+    # Clear breaks of the characters' must-haves / never lists ("" when fine or not checked).
+    looks: str = ""
 
     @property
     def current(self) -> str | None:
@@ -126,7 +156,7 @@ def list_comics() -> list[Comic]:
     return sorted(found, key=lambda c: c.created_at, reverse=True)
 
 
-def add_page_version(comic: Comic, index: int, png: bytes) -> str:
+def add_page_version(comic: Comic, index: int, png: bytes, info: VersionInfo | None = None) -> str:
     """Store a new drawing of page `index` (0-based); older versions are kept."""
     while len(comic.pages) <= index:
         comic.pages.append(PageState())
@@ -134,8 +164,31 @@ def add_page_version(comic: Comic, index: int, png: bytes) -> str:
     name = f"page_{index + 1}_v{len(page.versions) + 1}.png"
     write_atomic(_dir(comic.id) / name, png)
     page.versions.append(name)
+    page.info[name] = info or VersionInfo()
     save(comic)
     return name
+
+
+def _label(info: VersionInfo) -> str:
+    refs = ", ".join(f"{name}: {ref}" for name, ref in sorted(info.refs.items()))
+    extras = ("style anchor" if info.anchor else "", "continuity" if info.previous else "")
+    return " · ".join(part for part in (refs, *extras) if part)
+
+
+def rounds(comic: Comic) -> list[Round]:
+    """Drawing rounds in order, for the comparison grid (one column per round)."""
+    found: dict[str, Round] = {}
+    started: dict[str, float] = {}
+    for index, page in enumerate(comic.pages):
+        for name in page.versions:
+            info = page.info.get(name) or VersionInfo(round=name)
+            key = info.round or name
+            if key not in found:
+                found[key] = Round(id=key, label=_label(info), pages=[None] * len(comic.pages))
+                started[key] = info.at
+            found[key].pages[index] = name  # later tries in the same round replace earlier
+            started[key] = min(started[key], info.at)
+    return sorted(found.values(), key=lambda r: started[r.id])
 
 
 def page_path(comic_id: str, name: str) -> Path:

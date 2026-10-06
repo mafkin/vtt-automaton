@@ -156,11 +156,14 @@ def test_unknown_comic_is_404(client):
 
 
 def test_limits_card_saves_the_budget(client):
-    assert 'value="80000"' in client.get("/api/v1/limits").text
+    html = client.get("/api/v1/limits").text
+    assert 'value="80000"' in html and 'name="look_check"' in html and "checked" in html
     html = client.post(
         "/api/v1/limits", data={"token_budget_per_comic": "3000", "max_auto_redraws_per_page": "0"}
-    ).text
-    assert comics.load_limits() == Limits(token_budget_per_comic=3000, max_auto_redraws_per_page=0)
+    ).text  # an unticked checkbox isn't sent: look check off
+    assert comics.load_limits() == Limits(
+        token_budget_per_comic=3000, max_auto_redraws_per_page=0, look_check=False
+    )
     assert "Saved" in html
 
 
@@ -211,3 +214,38 @@ def test_containers_show_only_this_stack(client, monkeypatch):
     assert "ifc-checker" not in html and "some-standalone" not in html
     # Stopped containers are listed too.
     assert seen["query"] == {"all": "true"}
+
+
+def test_compare_grid_shows_rounds_side_by_side(client):
+    c = scripted(status="done")
+    info = comics.VersionInfo
+    comics.add_page_version(c, 0, b"a", info(round="r1", refs={"Pentik": "image"}))
+    comics.add_page_version(
+        c, 0, b"b", info(round="r2", refs={"Pentik": "sheet_1.png"}, anchor=True)
+    )
+    html = client.get(f"/api/v1/comics/{c.id}").text
+    assert "Compare" in html
+    assert "Pentik: image" in html and "Pentik: sheet_1.png · style anchor" in html
+    grid = html[html.index("Compare drawing rounds") :]
+    assert grid.index("page_1_v1.png") < grid.index("page_1_v2.png")  # round 1, then round 2
+    assert f"/api/v1/comics/{c.id}/pages/page_1_v2.png/anchor" in html
+
+
+def test_look_results_are_shown_under_the_page(client):
+    c = scripted(status="done")
+    comics.add_page_version(c, 0, b"a", comics.VersionInfo(round="r1", previous="page_0.png"))
+    c.pages[0].check, c.pages[0].looks = "ok", "Pentik: red castle on a white tabard"
+    comics.save(c)
+    html = client.get(f"/api/v1/comics/{c.id}").text
+    assert "Looks: Pentik: red castle on a white tabard" in html
+
+
+def test_preview_shows_which_speaker_tags_are_in_the_bible(client):
+    from app import bible
+
+    bible.add_character("Valeros")
+    html = client.get("/api/v1/dashboard/transcript?session_id=ended1").text
+    assert "✓ Valeros" in html
+    bible.delete_character("valeros")
+    html = client.get("/api/v1/dashboard/transcript?session_id=ended1").text
+    assert "✗ Valeros" in html and "not in the bible" in html

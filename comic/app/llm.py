@@ -33,14 +33,17 @@ class ScriptResult(BaseModel):
     pages: list[ScriptPage]
 
 
-class Lettering(BaseModel):
-    texts: list[str]
-
-
 def _client() -> genai.Client:
     """Keep the result in a variable for the whole call: the client closes its connection when
     it is garbage-collected, so "_client().models.generate_content(...)" fails."""
-    return genai.Client(api_key=settings.gemini_api_key)
+    # Retry overload and server errors ("503 UNAVAILABLE: high demand" is common for the image
+    # model). Failed requests produce no tokens, so retries don't touch the budget.
+    retry = types.HttpRetryOptions(
+        attempts=4, initial_delay=5, max_delay=60, http_status_codes=[429, 500, 502, 503, 504]
+    )
+    return genai.Client(
+        api_key=settings.gemini_api_key, http_options=types.HttpOptions(retry_options=retry)
+    )
 
 
 def _tokens(response) -> int:
@@ -60,13 +63,18 @@ def bible_context(bible: Bible) -> str:
         for c in bible.characters:
             also = f" (also: {', '.join(c.aliases)})" if c.aliases else ""
             look = f": {c.appearance}" if c.appearance else ""
-            lines.append(f"- {c.name}{also}{look}")
+            spec = (f". Must have: {'; '.join(c.traits)}" if c.traits else "") + (
+                f". Never: {'; '.join(c.never)}" if c.never else ""
+            )
+            lines.append(f"- {c.name}{also}{look}{spec}")
     return "\n".join(lines)
 
 
 def events_prompt(transcript: str, bible: Bible) -> str:
     return f"""You read the automatic speech-recognition transcript of a tabletop RPG session.
 It may have no speaker names, many recognition errors, and out-of-game chatter mixed in.
+Lines written "Speaker (Character): text" come from a player speaking as that character: use the
+character's name, not the player's.
 
 Campaign notes and the player characters:
 {bible_context(bible) or "(none)"}
@@ -118,6 +126,8 @@ For each page:
 - "panels": 4-6 panels. Each has "visual": a concrete description of the scene (where, who
   stands where doing what, camera angle, the place's architecture as the setting describes it),
   and "balloons": 0-2 speech balloons, each with "speaker" and "text".
+Panel descriptions must agree with each character's must-haves and never list (weapons,
+armour, clothing): the page drawer follows them.
 Write fresh, punchy dialogue in {bible.bubble_language}, at most ~10 words per balloon. Don't
 quote the transcript verbatim: it is full of recognition errors. Build each page to a payoff in
 its last panel."""
@@ -137,22 +147,60 @@ def write_script(events: str, moments: list[Moment], bible: Bible) -> tuple[list
     return ScriptResult.model_validate_json(response.text).pages, _tokens(response)
 
 
-def draw_prompt(page: ScriptPage, bible: Bible, cast: list[Character], extra: str = "") -> str:
-    refs = "; ".join(
-        f"Reference image {i} is {c.name.upper()}" + (f" ({c.appearance})" if c.appearance else "")
-        for i, c in enumerate(cast, 1)
-    )
+def _spec(c: Character) -> str:
+    parts = []
+    if c.traits:
+        parts.append(f"{c.name.upper()} must have: {'; '.join(c.traits)}")
+    if c.never:
+        parts.append(f"{c.name.upper()} never: {'; '.join(c.never)}")
+    if c.appearance:
+        parts.append(f"Look: {c.appearance}")
+    return ". ".join(parts)
+
+
+def draw_prompt(
+    page: ScriptPage,
+    bible: Bible,
+    cast: list[tuple[Character, list[str]]],
+    extra: str = "",
+    anchor: bool = False,
+    previous: bool = False,
+) -> str:
+    """The page drawer's prompt. Images come in this order: each cast member's references (as
+    labelled), then the style anchor page if `anchor`, then the previous page if `previous`."""
+    lines, n = [], 0
+    for c, labels in cast:
+        for label in labels:
+            n += 1
+            lines.append(f"Reference image {n} is {c.name.upper()} ({label})")
+        if spec := _spec(c):
+            lines.append(spec)
+    if anchor:
+        n += 1
+        lines.append(
+            f"Reference image {n} is a STYLE REFERENCE page from the same comic: match its drawing"
+            " style, colours, lettering and panel borders. Don't copy its characters, scene or text."
+        )
+    if previous:
+        n += 1
+        lines.append(
+            f"Reference image {n} is the PREVIOUS PAGE of this comic: keep every character's look,"
+            " the rendering style and the lettering exactly as there. Don't copy its panels or text."
+        )
     panels = "\n".join(
         f"Panel {i}: {p.visual}\n  Balloons: "
         + (" | ".join(f'{b.speaker}: "{b.text}"' for b in p.balloons) or "(none)")
         for i, p in enumerate(page.panels, 1)
     )
+    refs = "\n".join(lines)
     return f"""Draw one finished comic page with {len(page.panels)} panels, clean gutters, and the
 title "{page.title}" at the top, lettered exactly like that.
 Art style: {bible.style.positive}. Avoid: {bible.style.negative}.
+Page look: {bible.style.page_look}.
 Setting: {bible.setting}
-Characters: {refs or "(no references)"}. Keep their designs exactly as in the reference images
-and consistent in every panel.
+Characters: keep their designs exactly as in their reference images, the same in every panel.
+These details win over anything the panel descriptions say or imply.
+{refs or "(no references)"}
 Letter every speech balloon exactly as written, character for character ({bible.bubble_language}),
 in clear comic lettering with the tail pointing at the speaker. Each balloon appears once.
 No captions or narration boxes, and no other text except sound effects.
@@ -162,41 +210,80 @@ No captions or narration boxes, and no other text except sound effects.
 
 
 def draw_page(
-    page: ScriptPage, bible: Bible, cast: list[tuple[Character, bytes]], extra: str = ""
+    page: ScriptPage,
+    bible: Bible,
+    cast: list[tuple[Character, list[tuple[str, bytes]]]],
+    extra: str = "",
+    anchor: bytes | None = None,
+    previous: bytes | None = None,
 ) -> tuple[bytes, int]:
-    """One page image (PNG) from the script, steered by one reference image per character."""
-    parts = [types.Part.from_bytes(data=png, mime_type="image/png") for _, png in cast]
+    """One page image (PNG) from the script, steered by each character's labelled references,
+    and optionally a style anchor page and the previous page of the comic."""
+    images = [png for _, refs in cast for _, png in refs]
+    images += [img for img in (anchor, previous) if img]
+    parts = [types.Part.from_bytes(data=png, mime_type="image/png") for png in images]
+    labels = [(c, [label for label, _ in refs]) for c, refs in cast]
+    prompt = draw_prompt(page, bible, labels, extra, bool(anchor), bool(previous))
     client = _client()
     response = client.models.generate_content(
         model=settings.gemini_image_model,
-        contents=[*parts, draw_prompt(page, bible, [c for c, _ in cast], extra)],
+        contents=[*parts, prompt],
         config=types.GenerateContentConfig(
             response_modalities=["IMAGE"],
             image_config=types.ImageConfig(aspect_ratio="3:4"),
         ),
     )
-    for part in response.candidates[0].content.parts if response.candidates else []:
-        if part.inline_data and part.inline_data.data:
-            return part.inline_data.data, _tokens(response)
-    raise RuntimeError("Gemini returned no image")
+    return _image_bytes(response), _tokens(response)
 
 
-def read_lettering(png: bytes) -> tuple[list[str], int]:
-    """The speech balloon and caption texts on a page, as the model reads them."""
+class LookProblem(BaseModel):
+    character: str
+    problem: str
+
+
+class Inspection(BaseModel):
+    texts: list[str]
+    looks: list[LookProblem] = []
+
+
+def inspect_prompt(cast: list[Character], look_check: bool) -> str:
+    """Read the lettering back and, with `look_check`, find clear breaks of the characters' specs."""
+    prompt = (
+        '"texts": the text of every speech balloon and caption box on this comic page, one entry '
+        "per balloon or box, exactly as written. Leave out sound effects and the page title."
+    )
+    specs = [c for c in cast if c.traits or c.never]
+    if look_check and specs:
+        rules = "\n".join(
+            f"- {c.name}: must have {'; '.join(c.traits) or '-'}; never {'; '.join(c.never) or '-'}"
+            for c in specs
+        )
+        prompt += f"""
+"looks": for these characters, list only clear breaks of their rules that you can see on the
+page, one entry per problem, naming the character. A detail that is not visible in a panel
+(turned away, cropped, too small) is not a problem. Empty list if all is well.
+{rules}"""
+    else:
+        prompt += ' "looks": always an empty list.'
+    return prompt
+
+
+def inspect_page(
+    png: bytes, cast: list[Character], look_check: bool = True
+) -> tuple[Inspection, int]:
+    """One vision call per drawn page: the lettering, and (optionally) the characters' looks."""
     client = _client()
     response = client.models.generate_content(
         model=settings.gemini_model,
         contents=[
             types.Part.from_bytes(data=png, mime_type="image/png"),
-            "List the text of every speech balloon and caption box on this comic page, one "
-            "entry per balloon or box, exactly as written. Leave out sound effects and the "
-            "page title.",
+            inspect_prompt(cast, look_check),
         ],
         config=types.GenerateContentConfig(
-            response_mime_type="application/json", response_schema=Lettering, temperature=0
+            response_mime_type="application/json", response_schema=Inspection, temperature=0
         ),
     )
-    return Lettering.model_validate_json(response.text).texts, _tokens(response)
+    return Inspection.model_validate_json(response.text), _tokens(response)
 
 
 def _norm(text: str) -> str:
@@ -222,25 +309,99 @@ def lettering_problems(page: ScriptPage, read: list[str]) -> list[str]:
     return problems
 
 
+class CharacterDraft(BaseModel):
+    appearance: str
+    traits: list[str]
+
+
 def describe_prompt(name: str, notes: str = "") -> str:
     return (
         f"These are reference images of {name}, a character in a fantasy tabletop campaign. "
-        "Describe how they look for a text-to-image prompt: species, build, hair, face, "
-        "clothing, colours and signature items. Comma-separated phrases, at most 40 words, "
-        "no names, no story. Leave out the pose, viewpoint, background and lighting of the "
-        "images: the text is reused for every panel the character appears in."
-        + (f" Notes from the players: {notes}" if notes else "")
+        '"appearance": how they look, for an image prompt: species, build, hair, face, clothing, '
+        "colours and signature items; comma-separated phrases, at most 40 words, no names, no "
+        'story. "traits": the 3-6 details that make them recognisable at a glance and must '
+        'never change, each exact about shape, colour and position (e.g. "flat-topped '
+        'cylindrical great helm with a horizontal eye slit", "red headband with two trailing '
+        'ribbons", "spotted grey seal"). Leave out the pose, viewpoint, '
+        "background and lighting of the images: the text is reused for every page the "
+        "character appears in." + (f" Notes from the players: {notes}" if notes else "")
     )
 
 
-def describe_character(name: str, images: list[bytes], notes: str = "") -> str:
-    """Draft a short visual description of a character from their reference images."""
-    client = genai.Client(api_key=settings.gemini_api_key)
-    prompt = describe_prompt(name, notes)
+def describe_character(
+    name: str, images: list[bytes], notes: str = ""
+) -> tuple[CharacterDraft, int]:
+    """Draft a short visual description and must-have traits from the reference images."""
+    client = _client()
     parts = [types.Part.from_bytes(data=img, mime_type="image/png") for img in images]
     response = client.models.generate_content(
         model=settings.gemini_model,
-        contents=[*parts, prompt],
-        config=types.GenerateContentConfig(temperature=0.2),
+        contents=[*parts, describe_prompt(name, notes)],
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json", response_schema=CharacterDraft, temperature=0.2
+        ),
     )
-    return (response.text or "").strip()
+    return CharacterDraft.model_validate_json(response.text), _tokens(response)
+
+
+def sheet_prompt(character: Character, bible: Bible) -> str:
+    traits = "; ".join(character.traits)
+    never = "; ".join(character.never)
+    return f"""Draw a character model sheet of {character.name} for a comic: full body seen from
+the front, in three-quarter view and from the side, standing in a neutral pose, side by side
+on a plain light background. The same character in every view.
+Look: {character.appearance or "as in the reference images"}.
+{f"Must have: {traits}." if traits else ""}
+{f"Never: {never}." if never else ""}
+Art style: {bible.style.positive}. Avoid: {bible.style.negative}.
+The reference images show this character; keep their design, but draw it in the art style
+above. No text, no labels, no other characters."""
+
+
+def _image_bytes(response) -> bytes:
+    for part in response.candidates[0].content.parts if response.candidates else []:
+        if part.inline_data and part.inline_data.data:
+            return part.inline_data.data
+    raise RuntimeError("Gemini returned no image")
+
+
+def draw_sheet(character: Character, images: list[bytes], bible: Bible) -> tuple[bytes, int]:
+    client = _client()
+    parts = [types.Part.from_bytes(data=img, mime_type="image/png") for img in images]
+    response = client.models.generate_content(
+        model=settings.gemini_image_model,
+        contents=[*parts, sheet_prompt(character, bible)],
+        config=types.GenerateContentConfig(
+            response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="16:9")
+        ),
+    )
+    return _image_bytes(response), _tokens(response)
+
+
+def detail_sheet_prompt(character: Character, bible: Bible) -> str:
+    traits = "; ".join(character.traits)
+    never = "; ".join(character.never)
+    return f"""Draw a detail sheet of {character.name} for a comic: large close-ups, side by side
+on a plain light background, of what makes this character recognisable: head or helm from the
+front and from the side, any emblem or crest on the chest, the shield face, the main weapon,
+signature items. Each detail big and sharp enough to copy exactly.
+The first image is the approved full-body sheet of {character.name}: the details must match it
+exactly. Any further images are the original references.
+{f"Must have: {traits}." if traits else ""}
+{f"Never: {never}." if never else ""}
+Art style: {bible.style.positive}. No text, no labels, no other characters."""
+
+
+def draw_detail_sheet(
+    character: Character, sheet: bytes, images: list[bytes], bible: Bible
+) -> tuple[bytes, int]:
+    client = _client()
+    parts = [types.Part.from_bytes(data=img, mime_type="image/png") for img in [sheet, *images]]
+    response = client.models.generate_content(
+        model=settings.gemini_image_model,
+        contents=[*parts, detail_sheet_prompt(character, bible)],
+        config=types.GenerateContentConfig(
+            response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="16:9")
+        ),
+    )
+    return _image_bytes(response), _tokens(response)
