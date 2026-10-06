@@ -1,54 +1,36 @@
 from app import worker
-from app.config import settings
-from app.gpu import recover
-from app.sessions import any_live, ended_sessions_with_transcripts, transcript
+from app.sessions import ended_sessions_with_transcripts, transcript
 
 
-def test_worker_settings_fit_a_long_single_gpu_job():
+def test_worker_runs_one_comic_step_at_a_time():
     s = worker.WorkerSettings
-    assert s.job_timeout == settings.job_timeout_seconds >= 3600
-    assert s.max_jobs == 1
-    assert s.max_tries == 1
-    assert s.keep_result == 0
-    # A crash mid-job must not leave STT stopped or ComfyUI holding the GPU.
-    assert s.on_startup is recover
+    assert {f.__name__ for f in s.functions} == {"extract_job", "script_job", "draw_job"}
+    assert s.max_jobs == 1 and s.max_tries == 1 and s.keep_result == 0
+    # No GPU handover any more: nothing to recover at startup.
+    assert getattr(s, "on_startup", None) is None
 
 
-async def test_worker_refuses_live_and_unknown_sessions(no_live_sessions, monkeypatch):
-    ran = []
+async def test_jobs_call_the_pipeline_steps(monkeypatch):
+    calls = []
 
-    async def fake_pipeline(session_id, test=False):
-        ran.append((session_id, test))
+    async def fake(*args, **kwargs):
+        calls.append((args, kwargs))
 
-    monkeypatch.setattr(worker, "run_pipeline", fake_pipeline)
-    await worker.generate_comic({}, "nope")
-    await worker.generate_comic({}, "ended1")
-    await worker.generate_comic({}, "ended1", True)
-    assert ran == [("ended1", False), ("ended1", True)]
-
-
-async def test_worker_refuses_while_any_session_is_live(sessions_db, monkeypatch):
-    # ended1 is finished, but live1 is recording: stopping STT now would cut tonight's game.
-    ran = []
-
-    async def fake_pipeline(session_id, test=False):
-        ran.append(session_id)
-
-    monkeypatch.setattr(worker, "run_pipeline", fake_pipeline)
-    await worker.generate_comic({}, "ended1")
-    assert ran == []
+    monkeypatch.setattr(worker.pipeline, "extract", fake)
+    monkeypatch.setattr(worker.pipeline, "script", fake)
+    monkeypatch.setattr(worker.pipeline, "draw", fake)
+    await worker.extract_job({}, "c1")
+    await worker.script_job({}, "c1", [0, 2], "oma")
+    await worker.draw_job({}, "c1", 1, "kilpi")
+    assert calls == [
+        (("c1",), {}),
+        (("c1", [0, 2], "oma"), {}),
+        (("c1", 1, "kilpi"), {}),
+    ]
 
 
 def test_transcript_is_in_time_order_with_characters(sessions_db):
     assert transcript("ended1") == "GM: Örkit hyökkäävät.\nAino (Valeros): Hyökkään!"
-
-
-def test_any_live(sessions_db, no_live_sessions):
-    assert any_live() is False
-
-
-def test_any_live_with_a_live_session(sessions_db):
-    assert any_live() is True
 
 
 def test_ended_sessions_with_transcripts_skips_live_and_empty(sessions_db):

@@ -1,192 +1,135 @@
-import json
-from contextlib import asynccontextmanager
+import io
 
 import pytest
+from PIL import Image
 
-from app import pipeline
-from app.llm import (
-    FULL_PAGES,
-    TEST_PAGES,
-    BeatSheet,
-    PageDetail,
-    PageOutline,
-    Panel,
-    beat_sheet_prompt,
-)
+from app import bible as bible_store
+from app import comics, pipeline
+from app.comics import Balloon, Limits, Moment, ScriptPage, ScriptPanel
+from app.llm import EventsResult
 
 
-def test_production_comics_stay_8_to_10_pages():
-    assert FULL_PAGES == (8, 10)
-    assert TEST_PAGES == (1, 2)
-    assert "comic book issue of 8-10 pages" in beat_sheet_prompt("GM: Hei.", FULL_PAGES)
-    assert "comic book issue of 1-2 pages" in beat_sheet_prompt("GM: Hei.", TEST_PAGES)
+def png(colour="red") -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), colour).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def a_page(title="Sivu", text="Ota tuo elävänä!") -> ScriptPage:
+    return ScriptPage(
+        title=title,
+        characters=["Pentik"],
+        panels=[ScriptPanel(visual="v", balloons=[Balloon(speaker="Pentik", text=text)])],
+    )
 
 
 @pytest.fixture
-def fake_pipeline(monkeypatch, tmp_path):
-    """Runs run_pipeline without Gemini, ComfyUI or Docker. Returns what it was asked to do."""
-    from app.config import settings
+def gemini(monkeypatch, sessions_db):
+    """Fake Gemini. `read` decides what the lettering check sees for each drawing, in order."""
+    calls = {"draw": [], "read": [], "script_moments": None}
+    reads: list[list[str]] = []
 
-    monkeypatch.setattr(settings, "comfy_output_dir", str(tmp_path))
-    seen = {"pages": None, "rendered": [], "render_kwargs": []}
+    def extract(transcript, bible):
+        calls["transcript"] = transcript
+        moments = [Moment(title="Kuulustelu"), Moment(title="Tikari")]
+        return EventsResult(events="1. Fight", moments=moments), 1000
 
-    def beat_sheet(transcript, pages, context=""):
-        seen["pages"] = pages
-        # Gemini doesn't always keep to the count: five pages for a 1-2 page request.
-        return BeatSheet(pages=[PageOutline(page_number=n, beats=[]) for n in range(1, 6)])
+    def script(events, moments, bible):
+        calls["script_moments"] = [m.title for m in moments]
+        return [a_page(f"Sivu {i}") for i, _ in enumerate(moments, 1)], 2000
 
-    def page_detail(outline, transcript, context="", language="Finnish"):
-        panel = Panel(panel_number=1, image_prompt="x", character_focus=[], speech_bubbles=[])
-        return PageDetail(page_number=outline.page_number, panels=[panel])
+    def draw(page, bible, cast, extra=""):
+        calls["draw"].append((page.title, [c.name for c, _ in cast], extra))
+        return png(), 1800
 
-    @asynccontextmanager
-    async def no_gpu(session_id):
-        yield
+    def read(image):
+        calls["read"].append(image)
+        return (reads.pop(0) if reads else ["Ota tuo elävänä!"]), 1300
 
-    async def render(prefix, panel, **kwargs):
-        seen["rendered"].append(prefix)
-        seen["render_kwargs"].append(kwargs)
-
-    monkeypatch.setattr(pipeline, "get_transcript", lambda session_id: "GM: Hei.")
-    monkeypatch.setattr(pipeline, "generate_beat_sheet", beat_sheet)
-    monkeypatch.setattr(pipeline, "generate_page_detail", page_detail)
-    monkeypatch.setattr(pipeline, "comic_mode", no_gpu)
-    monkeypatch.setattr(pipeline, "render_panel", render)
-    return seen
-
-
-async def test_a_full_run_asks_for_8_to_10_pages(fake_pipeline):
-    await pipeline.run_pipeline("s1")
-    assert fake_pipeline["pages"] == FULL_PAGES
-    assert fake_pipeline["rendered"][0] == "comic_s1_p1_pan1"
+    monkeypatch.setattr(pipeline, "extract_events", extract)
+    monkeypatch.setattr(pipeline, "write_script", script)
+    monkeypatch.setattr(pipeline, "draw_page", draw)
+    monkeypatch.setattr(pipeline, "read_lettering", read)
+    ch = bible_store.add_character("Pentik")
+    bible_store.add_image(ch.id, png("blue"))
+    calls["reads"] = reads
+    return calls
 
 
-async def test_a_test_run_is_capped_at_2_pages_and_named_apart(fake_pipeline):
-    await pipeline.run_pipeline("s1", test=True)
-    assert fake_pipeline["pages"] == TEST_PAGES
-    assert fake_pipeline["rendered"] == ["comic_s1_test_p1_pan1", "comic_s1_test_p2_pan1"]
+async def test_extract_stores_events_moments_and_tokens(gemini):
+    c = comics.create("ended1", "Session 12")
+    await pipeline.extract(c.id)
+    c = comics.load(c.id)
+    assert c.status == "events" and c.events == "1. Fight"
+    assert [m.title for m in c.moments] == ["Kuulustelu", "Tikari"]
+    assert c.tokens_used == 1000
+    assert "Örkit hyökkäävät." in gemini["transcript"]
 
 
-async def test_a_rerun_letters_the_new_panel_not_the_old_one(tmp_path, monkeypatch):
-    # ComfyUI never overwrites: a second render of the same prefix is saved as _00002_.
-    from PIL import Image
-
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "comfy_output_dir", str(tmp_path))
-    for counter, colour in (("00001", "red"), ("00002", "blue")):
-        Image.new("RGB", (64, 64), colour).save(tmp_path / f"comic_s1_p1_pan1_{counter}_.png")
-    Image.new("RGB", (64, 64), "red").save(tmp_path / "comic_s1_p1_pan1_00001__lettered.png")
-    # A longer prefix that starts the same must not be picked up.
-    Image.new("RGB", (64, 64), "red").save(tmp_path / "comic_s1_p1_pan10_00009_.png")
-
-    async def queued(prompt):
-        return {"prompt_id": "p"}, "c"
-
-    async def done(prompt_id, client_id):
-        return True
-
-    lettered = []
-    monkeypatch.setattr(pipeline, "queue_prompt", queued)
-    monkeypatch.setattr(pipeline, "wait_for_completion", done)
-    monkeypatch.setattr(pipeline, "layout_bubbles", lambda path, bubbles: lettered.append(path))
-
-    panel = Panel(panel_number=1, image_prompt="x", character_focus=[], speech_bubbles=["Hei"])
-    await pipeline.render_panel("comic_s1_p1_pan1", panel, positive="x", negative="", seed=1)
-    assert lettered == [str(tmp_path / "comic_s1_p1_pan1_00002_.png")]
+async def test_script_uses_the_chosen_moments_and_your_own(gemini):
+    c = comics.create("ended1", "S")
+    await pipeline.extract(c.id)
+    await pipeline.script(c.id, chosen=[1], own="Käl heittää tikarin kattoon")
+    c = comics.load(c.id)
+    assert gemini["script_moments"] == ["Tikari", "Käl heittää tikarin kattoon"]
+    assert c.status == "script" and [p.title for p in c.script] == ["Sivu 1", "Sivu 2"]
+    assert c.tokens_used == 3000
 
 
-# --- comic bible in the script and the render ---------------------------------------------
-
-from app import bible as bible_store  # noqa: E402
-from app.bible import Bible, Character, Style  # noqa: E402
-from app.llm import bible_context, page_detail_prompt  # noqa: E402
-
-
-def campaign() -> Bible:
-    return Bible(
-        setting="Restov, a Brevic city with Eastern European architecture",
-        tone="light-hearted",
-        bubble_language="Finnish",
-        style=Style(positive="ink comic", negative="blurry"),
-        characters=[
-            Character(
-                id="rintaro",
-                name="Rintaro",
-                aliases=["Rin"],
-                appearance="Uminari swordsman, red kimono",
-                images=["aaaaaaaaaaaaaaaa.png"],
-            ),
-            Character(id="kal", name="Käl", appearance="small goblin, green cloak"),
-        ],
-    )
+async def test_draw_letters_checks_and_sends_only_the_pages_cast(gemini):
+    c = comics.create("ended1", "S")
+    c.script = [a_page()]
+    comics.save(c)
+    await pipeline.draw(c.id)
+    c = comics.load(c.id)
+    assert c.status == "done" and c.pages[0].versions == ["page_1_v1.png"]
+    assert c.pages[0].check == "ok"
+    assert gemini["draw"] == [("Sivu", ["Pentik"], "")]
+    assert c.tokens_used == 1800 + 1300
 
 
-def test_the_script_gets_setting_tone_and_character_sheet():
-    context = bible_context(campaign())
-    assert "Restov" in context and "light-hearted" in context
-    assert "Rintaro (also: Rin): Uminari swordsman, red kimono" in context
-    assert "comic book issue of 8-10 pages" in beat_sheet_prompt("GM: Hei.", FULL_PAGES, context)
-    assert "Restov" in beat_sheet_prompt("GM: Hei.", FULL_PAGES, context)
+async def test_a_lettering_mismatch_is_redrawn_once_and_reported(gemini):
+    gemini["reads"].extend([["Ota tuo elävänä!", "Ota tuo elävänä!"], ["väärin"]])
+    c = comics.create("ended1", "S")
+    c.script = [a_page()]
+    comics.save(c)
+    await pipeline.draw(c.id)
+    c = comics.load(c.id)
+    assert len(gemini["draw"]) == 2  # 1 + max_auto_redraws_per_page, never more
+    assert c.pages[0].versions == ["page_1_v1.png", "page_1_v2.png"]
+    assert c.pages[0].check.startswith("missing: Ota tuo elävänä!")
+    assert c.status == "done"
 
 
-def test_the_panel_script_sees_the_transcript_and_the_bubble_language():
-    outline = PageOutline(page_number=1, beats=[])
-    prompt = page_detail_prompt(outline, "Jessan: Paskanmakuista kalaa!", "CTX", "Finnish")
-    assert "Jessan: Paskanmakuista kalaa!" in prompt and "CTX" in prompt
-    assert "in Finnish" in prompt
+async def test_redraw_one_page_with_an_instruction(gemini):
+    c = comics.create("ended1", "S")
+    c.script = [a_page("A"), a_page("B")]
+    comics.save(c)
+    await pipeline.draw(c.id, page_index=1, extra="Pentik holds his shield")
+    assert gemini["draw"] == [("B", ["Pentik"], "Pentik holds his shield")]
+    assert comics.load(c.id).pages[1].versions == ["page_2_v1.png"]
 
 
-def panel(*focus: str) -> Panel:
-    return Panel(
-        panel_number=1,
-        image_prompt="drinking at a banquet",
-        character_focus=list(focus),
-        speech_bubbles=[],
-    )
+async def test_the_budget_stops_before_an_image_call(gemini):
+    comics.save_limits(Limits(token_budget_per_comic=3000))
+    c = comics.create("ended1", "S")
+    c.script = [a_page("A"), a_page("B")]
+    c.tokens_used = 1000
+    comics.save(c)
+    await pipeline.draw(c.id)
+    c = comics.load(c.id)
+    assert gemini["draw"] == []  # 1000 + one page's estimate > 3000: nothing was drawn
+    assert c.status == "budget" and "1000 / 3000" in c.message
 
 
-def test_panel_prompt_adds_style_and_appearance():
-    positive, negative, reference = pipeline.panel_prompt(campaign(), panel("Rin", "Käl"))
-    assert positive == (
-        "ink comic, drinking at a banquet, Rintaro: Uminari swordsman, red kimono, "
-        "Käl: small goblin, green cloak"
-    )
-    assert negative == "blurry"
-    assert reference is None  # two characters: one IP-Adapter would blend them
+async def test_a_failure_is_shown_and_never_leaves_the_comic_busy(gemini, monkeypatch):
+    def broken(*args, **kwargs):
+        raise RuntimeError("Gemini returned no image")
 
-
-def test_a_single_character_with_images_gets_an_ip_adapter_reference():
-    _, _, reference = pipeline.panel_prompt(campaign(), panel("Rintaro"))
-    assert reference == "characters/rintaro/aaaaaaaaaaaaaaaa.png"
-    assert pipeline.panel_prompt(campaign(), panel("Käl"))[2] is None  # no images
-    assert pipeline.panel_prompt(campaign(), panel("Stranger"))[2] is None
-
-
-async def test_a_run_uses_and_saves_the_bible_and_one_seed(fake_pipeline, tmp_path, monkeypatch):
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "comfy_output_dir", str(tmp_path))
-    bible_store.save(campaign())
-    await pipeline.run_pipeline("s1", test=True)
-    snapshot = json.loads((tmp_path / "comic_s1_test_bible.json").read_text())
-    assert snapshot["bible"]["setting"].startswith("Restov") and snapshot["test"] is True
-    seeds = [kw["seed"] for kw in fake_pipeline["render_kwargs"]]
-    assert len(set(seeds)) == len(seeds)  # each panel its own seed, derived from the comic's
-    assert seeds[0] == snapshot["seed"] + 101
-
-
-def test_the_appearance_draft_leaves_out_pose_and_lighting():
-    # The text goes into every panel: "seen from behind" would turn the character around in all.
-    from app.llm import describe_prompt
-
-    prompt = describe_prompt("Rintaro", "carries a katana")
-    assert "pose" in prompt and "viewpoint" in prompt and "lighting" in prompt
-    assert "carries a katana" in prompt and "at most 40 words" in prompt
-
-
-def test_image_prompts_must_restate_the_campaign_setting():
-    # In the first bible test run, a kimono in the appearance text turned Restov Japanese.
-    outline = PageOutline(page_number=1, beats=[])
-    prompt = page_detail_prompt(outline, "", "Setting: Restov", "Finnish")
-    assert "name the location and its architecture as the campaign setting describes it" in prompt
+    monkeypatch.setattr(pipeline, "draw_page", broken)
+    c = comics.create("ended1", "S")
+    c.script = [a_page()]
+    comics.save(c)
+    await pipeline.draw(c.id)
+    c = comics.load(c.id)
+    assert c.status == "failed" and "no image" in c.message

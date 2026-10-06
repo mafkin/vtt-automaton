@@ -6,11 +6,9 @@ data/comic/characters/<id>/. Edited from the dashboard; each comic job reads it 
 
 import io
 import json
-import os
 import re
 import secrets
 import shutil
-import tempfile
 import unicodedata
 from pathlib import Path
 
@@ -18,6 +16,7 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.files import write_atomic
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_SIDE = 1024
@@ -82,14 +81,8 @@ def load() -> Bible:
 
 
 def save(bible: Bible) -> None:
-    """Write atomically, so the worker never reads a half-written file."""
-    root = _root()
-    root.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=root, suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(json.dumps(bible.model_dump(), ensure_ascii=False, indent=2))
-    os.chmod(tmp, 0o644)  # mkstemp makes it 0600; keep it readable for the host user
-    os.replace(tmp, root / "bible.json")
+    text = json.dumps(bible.model_dump(), ensure_ascii=False, indent=2)
+    write_atomic(_root() / "bible.json", text.encode("utf-8"))
 
 
 def slugify(name: str) -> str:

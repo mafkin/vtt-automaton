@@ -1,9 +1,8 @@
 import contextlib
 import sqlite3
 from collections.abc import AsyncIterator
-from datetime import datetime
 from html import escape
-from urllib.parse import parse_qs
+from typing import Annotated
 
 import httpx
 from arq import create_pool
@@ -13,13 +12,11 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from app import bible
+from app import bible, comics
 from app.bible import BibleError
 from app.config import settings
-from app.gpu import lock_info
 from app.llm import describe_character
 from app.sessions import (
-    any_live,
     ended_sessions_with_transcripts,
     get_session,
     recent_sessions,
@@ -53,7 +50,7 @@ async def dashboard(request: Request):
 async def get_containers() -> str:
     try:
         async with httpx.AsyncClient() as client:
-            # all=true: ComfyUI is stopped between comics and should still be listed.
+            # all=true: stopped containers are shown too.
             r = await client.get(
                 f"{settings.docker_proxy_url}/containers/json",
                 params={"all": "true"},
@@ -71,8 +68,6 @@ async def get_containers() -> str:
         name = escape(c["Names"][0].lstrip("/"))
         state = escape(c["State"])
         color = "text-green-400" if c["State"] == "running" else "text-red-400"
-        if name == settings.comfyui_container_name and c["State"] != "running":
-            state, color = f"{state} – starts for comics", "text-slate-400"
         items.append(
             "<li class='flex justify-between border-b border-slate-700 pb-2'>"
             f"<span>{name}</span><span class='{color}'>{state}</span></li>"
@@ -101,67 +96,6 @@ async def get_sessions() -> str:
     return "<ul class='space-y-4'>" + "".join(items) + "</ul>"
 
 
-def _blocked_reason() -> str | None:
-    """Why no comic can start right now, or None."""
-    if lock_info() is not None:
-        return "Comic in progress"
-    if any_live():
-        return "Session live"
-    return None
-
-
-@app.get("/api/v1/dashboard/mode", response_class=HTMLResponse)
-async def get_mode() -> str:
-    lock = lock_info()
-    if lock is None:
-        return "<span class='text-green-400 font-bold'>Idle</span> – transcription available"
-    session = escape(str(lock.get("session_id") or "unknown session"))
-    return (
-        f"<span class='text-amber-400 font-bold'>Comic mode</span> – rendering {session}, "
-        "transcription unavailable until it finishes"
-    )
-
-
-@app.get("/api/v1/dashboard/picker", response_class=HTMLResponse)
-async def get_picker() -> str:
-    try:
-        choices = ended_sessions_with_transcripts()
-        blocked = _blocked_reason()
-    except sqlite3.Error as exc:
-        return f"<p class='text-red-500'>Error loading transcripts: {escape(str(exc))}</p>"
-    if not choices:
-        return "<p class='text-slate-400'>No finished sessions with a transcript yet.</p>"
-    options = "".join(
-        f"<option value='{escape(c.id)}'>{escape(c.label or 'Unnamed Session')} – "
-        f"{datetime.fromtimestamp(c.started_at):%-d.%-m.%Y} – {c.segments} lines</option>"
-        for c in choices
-    )
-    disabled = " disabled" if blocked else ""
-    style = (
-        "text-white px-4 py-2 rounded transition disabled:bg-slate-600 disabled:cursor-not-allowed"
-    )
-    buttons = (
-        f"<button type='submit' class='bg-blue-600 hover:bg-blue-500 {style}'{disabled}>"
-        "Generate comic (8–10 pages)</button>"
-        # htmx sends the clicked button's name/value with the form.
-        f"<button type='submit' name='mode' value='test' "
-        f"class='bg-slate-500 hover:bg-slate-400 {style}'{disabled}>Test run (1–2 pages)</button>"
-    )
-    reason = f"<span class='text-amber-400'>{escape(blocked)}</span>" if blocked else ""
-    return (
-        "<form hx-post='/api/v1/dashboard/generate' hx-target='#generate-result' "
-        "class='space-y-4'>"
-        "<select name='session_id' hx-get='/api/v1/dashboard/transcript' "
-        "hx-trigger='load, change' hx-target='#transcript-preview' "
-        "class='w-full bg-slate-700 text-white p-2 rounded'>"
-        f"{options}</select>"
-        f"<div class='flex flex-wrap items-center gap-4'>{buttons}{reason}"
-        "<span id='generate-result'></span></div></form>"
-        "<pre id='transcript-preview' class='mt-4 text-sm text-slate-300 whitespace-pre-wrap "
-        "bg-slate-900 p-3 rounded'></pre>"
-    )
-
-
 @app.get("/api/v1/dashboard/transcript", response_class=HTMLResponse)
 async def get_transcript_preview(session_id: str) -> str:
     if get_session(session_id) is None:
@@ -171,56 +105,181 @@ async def get_transcript_preview(session_id: str) -> str:
     return escape("\n".join(lines[:PREVIEW_LINES]) + more)
 
 
-async def _queue_comic(request: Request, session_id: str, test: bool) -> bool:
-    """Queue a comic for a finished session. Returns False if it is already queued/running."""
+# --- comics ----------------------------------------------------------------------------------
+
+
+def _comic_view(request: Request, comic: comics.Comic, notice: str = "") -> HTMLResponse:
+    context = {
+        "c": comic,
+        "busy": comic.status in comics.BUSY,
+        "budget": comics.load_limits().token_budget_per_comic,
+        "notice": notice,
+    }
+    return templates.TemplateResponse(request, "comic.html", context)
+
+
+def _load(comic_id: str) -> comics.Comic:
+    try:
+        return comics.load(comic_id)
+    except KeyError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown comic") from exc
+
+
+def _error(message: str) -> HTMLResponse:
+    return HTMLResponse(f"<p class='text-red-400 font-bold'>{escape(message)}</p>")
+
+
+@app.get("/api/v1/comics", response_class=HTMLResponse)
+async def get_comics(request: Request):
+    try:
+        sessions = ended_sessions_with_transcripts()
+    except sqlite3.Error as exc:
+        return _error(f"Error loading transcripts: {exc}")
+    context = {
+        "sessions": sessions,
+        "comics": comics.list_comics(),
+        "budget": comics.load_limits().token_budget_per_comic,
+        "busy": comics.BUSY,
+    }
+    return templates.TemplateResponse(request, "comics.html", context)
+
+
+@app.post("/api/v1/comics", response_class=HTMLResponse)
+async def start_comic(request: Request, session_id: str = Form("")):
     session = get_session(session_id)
     if session is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown session")
+        return _error("Unknown session")
     if session.live:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail="Session is still recording; stop it first (/session stop)",
-        )
-    if lock_info() is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, detail="A comic is already being rendered")
-    if any_live():
-        # Rendering stops STT, which would cut off the session that is recording.
-        raise HTTPException(status.HTTP_409_CONFLICT, detail="A session is recording")
-    # One job per session at a time: arq ignores a job id that is already queued or running.
-    job = await request.app.state.queue.enqueue_job(
-        "generate_comic", session_id, test, _job_id=f"comic:{session_id}"
+        return _error("Session is still recording; stop it first (/session stop)")
+    comic = comics.create(session.id, session.label or session.id)
+    comic.status = "extracting"
+    comics.save(comic)
+    await request.app.state.queue.enqueue_job(
+        "extract_job", comic.id, _job_id=f"comic:{comic.id}:extract"
     )
-    return job is not None
+    return _comic_view(request, comic)
 
 
-@app.post("/api/v1/dashboard/generate", response_class=HTMLResponse)
-async def generate_from_dashboard(request: Request) -> str:
-    # htmx posts the form URL-encoded; parsed here to avoid a python-multipart dependency.
-    form = parse_qs((await request.body()).decode())
-    session_id = (form.get("session_id") or [""])[0]
-    test = (form.get("mode") or [""])[0] == "test"
+@app.get("/api/v1/comics/{comic_id}", response_class=HTMLResponse)
+async def get_comic(request: Request, comic_id: str):
+    return _comic_view(request, _load(comic_id))
+
+
+async def _queue_step(
+    request: Request, comic: comics.Comic, busy: str, job: str, *args, key: str
+) -> HTMLResponse:
+    """Mark the comic busy and queue a worker step, unless it is already working."""
+    if comic.status in comics.BUSY:
+        return _comic_view(request, comic, "This comic is already working; wait for it.")
+    comic.status, comic.message = busy, ""
+    comics.save(comic)
+    await request.app.state.queue.enqueue_job(job, comic.id, *args, _job_id=f"comic:{key}")
+    return _comic_view(request, comic)
+
+
+@app.post("/api/v1/comics/{comic_id}/script", response_class=HTMLResponse)
+async def write_comic_script(
+    request: Request,
+    comic_id: str,
+    chosen: Annotated[list[int] | None, Form()] = None,
+    own: str = Form(""),
+):
+    comic = _load(comic_id)
+    chosen = chosen or []
+    if not chosen and not own.strip():
+        return _comic_view(request, comic, "Choose at least one moment, or describe your own.")
+    return await _queue_step(
+        request, comic, "scripting", "script_job", chosen, own.strip(), key=f"{comic.id}:script"
+    )
+
+
+def _balloons(text: str) -> list[comics.Balloon]:
+    """One balloon per line, "Speaker: text"."""
+    balloons = []
+    for line in text.splitlines():
+        speaker, sep, said = line.partition(":")
+        if line.strip():
+            balloons.append(
+                comics.Balloon(speaker=speaker.strip(), text=said.strip())
+                if sep
+                else comics.Balloon(speaker="", text=line.strip())
+            )
+    return balloons
+
+
+def _apply_script_edits(comic: comics.Comic, form) -> None:
+    """Copy the dashboard's script editor fields (if sent) into the comic."""
+    for i, page in enumerate(comic.script):
+        page.title = str(form.get(f"page-{i}-title", page.title)).strip() or page.title
+        names = str(form.get(f"page-{i}-characters", ", ".join(page.characters)))
+        page.characters = [n.strip() for n in names.split(",") if n.strip()]
+        for j, panel in enumerate(page.panels):
+            panel.visual = str(form.get(f"page-{i}-panel-{j}-visual", panel.visual)).strip()
+            key = f"page-{i}-panel-{j}-balloons"
+            if key in form:
+                panel.balloons = _balloons(str(form[key]))
+
+
+@app.post("/api/v1/comics/{comic_id}/script/save", response_class=HTMLResponse)
+async def save_comic_script(request: Request, comic_id: str):
+    comic = _load(comic_id)
+    if comic.status in comics.BUSY:
+        return _comic_view(request, comic, "This comic is already working; wait for it.")
+    _apply_script_edits(comic, await request.form())
+    comics.save(comic)
+    return _comic_view(request, comic, "Script saved.")
+
+
+@app.post("/api/v1/comics/{comic_id}/draw", response_class=HTMLResponse)
+async def draw_comic(request: Request, comic_id: str):
+    """Draw all pages, or one ("page"). The buttons sit in the script editor, so its fields
+    come along: unsaved edits are saved first, and a page's redraw instruction is extra-<n>."""
+    comic = _load(comic_id)
+    if not comic.script:
+        return _comic_view(request, comic, "Write the script first.")
+    form = await request.form()
+    raw_page = str(form.get("page", "")).strip()
+    page = int(raw_page) if raw_page.isdigit() else None
+    if page is not None and page >= len(comic.script):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown page")
+    extra = str(form.get("extra") or form.get(f"extra-{page}") or "").strip()
+    if comic.status not in comics.BUSY:
+        _apply_script_edits(comic, form)
+    key = f"{comic.id}:draw" if page is None else f"{comic.id}:draw:{page}"
+    return await _queue_step(request, comic, "drawing", "draw_job", page, extra, key=key)
+
+
+@app.get("/api/v1/comics/{comic_id}/pages/{name}")
+async def get_page(comic_id: str, name: str):
     try:
-        queued = await _queue_comic(request, session_id, test)
-    except HTTPException as exc:
-        return f"<span class='text-red-400 font-bold'>{escape(str(exc.detail))}</span>"
-    kind = "Test run (1–2 pages)" if test else "Comic (8–10 pages)"
-    message = (
-        f"{kind} queued – comic mode starts after the script is written."
-        if queued
-        else "Already queued or running."
-    )
-    return f"<span class='text-green-400 font-bold'>{message}</span>"
+        path = comics.page_path(comic_id, name)
+    except KeyError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown page") from exc
+    return FileResponse(path, media_type="image/png")
 
 
-@app.post("/api/v1/comic/{session_id}", status_code=status.HTTP_202_ACCEPTED)
-async def trigger_comic_generation(session_id: str, request: Request, test: bool = False):
-    """Queue a comic; ?test=true makes a 1-2 page test run."""
-    queued = await _queue_comic(request, session_id, test)
-    return {
-        "status": "accepted" if queued else "already_queued",
-        "session_id": session_id,
-        "test": test,
-    }
+@app.get("/api/v1/limits", response_class=HTMLResponse)
+async def get_limits(request: Request):
+    return templates.TemplateResponse(request, "limits.html", {"limits": comics.load_limits()})
+
+
+@app.post("/api/v1/limits", response_class=HTMLResponse)
+async def save_limits(
+    request: Request,
+    token_budget_per_comic: int = Form(...),
+    max_auto_redraws_per_page: int = Form(...),
+):
+    limits, message = comics.load_limits(), "Saved."
+    if token_budget_per_comic < 0 or not 0 <= max_auto_redraws_per_page <= 3:
+        message = "The budget must be 0 or more, and automatic redraws 0-3."
+    else:
+        limits = comics.Limits(
+            token_budget_per_comic=token_budget_per_comic,
+            max_auto_redraws_per_page=max_auto_redraws_per_page,
+        )
+        comics.save_limits(limits)
+    context = {"limits": limits, "message": message}
+    return templates.TemplateResponse(request, "limits.html", context)
 
 
 # --- comic bible -----------------------------------------------------------------------------

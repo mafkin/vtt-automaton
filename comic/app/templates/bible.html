@@ -35,9 +35,9 @@
         <h3 class="text-lg font-semibold text-white">Characters</h3>
         <p class="text-sm text-slate-400">
             Names and aliases should match the transcript (the character set with <code>/link</code>,
-            or names in the narration). Reference images: show only the character, ideally on a
-            plain background. A full scene gets copied into the panels. They steer panels that
-            show this character alone.
+            or names in the narration). The first reference image of every character on a page
+            is given to the image model, so show only the character, clearly; other people in
+            the picture can end up in the comic.
         </p>
         {% for c in bible.characters %}
         <div class="bg-slate-700 p-4 rounded space-y-3" id="character-{{ c.id }}">
