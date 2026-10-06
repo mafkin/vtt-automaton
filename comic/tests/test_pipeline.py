@@ -243,3 +243,19 @@ async def test_the_look_check_can_be_switched_off(gemini):
     await pipeline.draw(c.id)
     assert gemini["look_check"] == [False] and len(gemini["draw"]) == 1
     assert comics.load(c.id).pages[0].looks == ""
+
+
+async def test_the_automatic_redraw_is_told_what_to_fix(gemini):
+    # Re-rolling with the same prompt brought the same mistakes back.
+    gemini["looks"].append([LookProblem(character="Pentik", problem="shield has no gold castle")])
+    gemini["reads"].append(["Ota tuo elävänä!", "Kirjaston ja Restov."])
+    c = comics.create("ended1", "S")
+    c.script = [a_page()]
+    comics.save(c)
+    await pipeline.draw(c.id, extra="Pentik on the left")
+    first, second = gemini["draw"][0][2], gemini["draw"][1][2]
+    assert first == "Pentik on the left"
+    assert second.startswith("Pentik on the left")
+    assert "Fix these mistakes of the previous attempt" in second
+    assert "Pentik: shield has no gold castle" in second
+    assert "extra: Kirjaston ja Restov." in second

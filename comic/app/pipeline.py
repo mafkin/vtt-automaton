@@ -98,10 +98,11 @@ async def _draw_page(
     previous_name = comic.pages[index - 1].current if 0 < index <= len(comic.pages) else None
     previous = comics.page_path(comic.id, previous_name).read_bytes() if previous_name else None
     limits = comics.load_limits()
+    instruction = extra
     for attempt in range(1 + limits.max_auto_redraws_per_page):
         comics.ensure_budget(comic, PAGE_ESTIMATE)
         png, draw_tokens = await asyncio.to_thread(
-            draw_page, page, bible, cast, extra, anchor, previous
+            draw_page, page, bible, cast, instruction, anchor, previous
         )
         comics.charge(comic, draw_tokens, "image")
         info = VersionInfo(
@@ -129,6 +130,11 @@ async def _draw_page(
         comics.save(comic)
         if not lettering and not looks:
             return
+        # Redraw with what was wrong: re-rolling the same prompt brings the same mistakes back.
+        fixes = "; ".join(looks + lettering)
+        instruction = "\n".join(
+            part for part in (extra, f"Fix these mistakes of the previous attempt: {fixes}") if part
+        )
         logger.info(
             "Comic %s page %d attempt %d: %s", comic.id, index + 1, attempt + 1, lettering + looks
         )
