@@ -1,19 +1,7 @@
-// PCM helpers. Discord voice decodes to 48 kHz, 16-bit, stereo, interleaved little-endian.
+// PCM helpers. The recorder decodes Discord's Opus to 48 kHz, 16-bit, mono, little-endian.
 
 export const SAMPLE_RATE = 48_000;
 export const BYTES_PER_SECOND_MONO = SAMPLE_RATE * 2;
-
-/** Average the two channels of interleaved s16le stereo PCM into mono. */
-export function stereoToMono(stereo: Buffer): Buffer {
-  const frames = Math.floor(stereo.length / 4);
-  const mono = Buffer.alloc(frames * 2);
-  for (let i = 0; i < frames; i++) {
-    const left = stereo.readInt16LE(i * 4);
-    const right = stereo.readInt16LE(i * 4 + 2);
-    mono.writeInt16LE((left + right) >> 1, i * 2);
-  }
-  return mono;
-}
 
 /** Wrap mono s16le PCM in a canonical 44-byte WAV header. */
 export function encodeWav(pcm: Buffer, sampleRate = SAMPLE_RATE): Buffer {

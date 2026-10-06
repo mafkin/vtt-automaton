@@ -83,8 +83,10 @@ convert it to Foundry chat HTML with `@UUID[...]` enrichers.
    the rules DB is English. A small LLM call returns the official English Remaster names of the
    rules elements involved plus an English translation of the question. If that call fails, the
    words of the query itself are used as search terms.
-2. **Retrieve deterministically.** Search the AoN SQLite index (FTS5 plus exact name/trait match),
-   then rank the results. Embeddings can be added later if FTS recall is poor.
+2. **Retrieve deterministically.** Exact name matches first, then SQLite FTS5 matches ranked by
+   bm25, with rule categories (actions, conditions, rules, spells, feats, traits…) ahead of
+   items, creatures and hazards. Up to 8 entries; in the prompt each is cut at 4,000 characters
+   (whole classes run to 15,000+).
 3. **Enforce the prompt.** Build a fixed two-section output contract:
    *§1 the full RAW text of every cited entry (from the DB, in English)*, then *§2 the ruling for
    the situation, in Finnish, keeping official English term names*. The LLM only chooses which
@@ -148,7 +150,7 @@ Discord voice ─▶ discord-bot ──WAV per utterance──▶ stt-worker (GP
    Opus stream per user** from `@discordjs/voice` 0.19 (DAVE end-to-end encryption is handled by
    `@snazzah/davey`). This gives speaker labels without a diarization model.
 2. **Cut.** Each stream ends after 800 ms of silence (Discord's own speaking detection). The Opus
-   is decoded to 48 kHz PCM, mixed to mono and sent as a WAV clip with
+   is decoded straight to 48 kHz mono PCM (libopus downmixes) and sent as a WAV clip with
    `(session_id, speaker, speaker_id, character, t_start)`. Speech longer than 30 s is sent in
    30 s pieces; clips under 0.4 s (coughs, clicks) are dropped. **No audio is stored** anywhere:
    clips exist only in memory until transcribed.
@@ -196,8 +198,8 @@ directly.) Keeping the adapter swappable makes it easy to compare models on the 
   Guns & Gears, Dark Archive) are stored with `legacy = 1` and never used for rulings (~1,400
   entries). They stay in the DB for possible later use (e.g. creatures in older APs). Older books
   with no Remaster edition (Secrets of Magic, Book of the Dead…) count as current.
-- AoN markdown is converted to plain text for quoting. The original markdown is kept too, for
-  richer rendering later.
+- AoN markdown is converted to plain text for quoting. The original markdown is not stored
+  (it would double the DB size); re-add it when compendium links need it.
 - The DB is written to a temp file and swapped in atomically, so requests never see a partial
   import, and a failed import keeps the old DB. The AoN index name is stored in `meta`; the
   periodic refresh (default every 24 h) costs one small query unless AoN has rebuilt.

@@ -117,3 +117,13 @@ async def test_ruling_and_end_to_end_times_are_logged(store, llm, caplog):
     )
     done = next(m for m in messages if "answered" in m)
     assert float(done.split("answered ")[1].split(" s")[0]) >= 2.0
+
+
+async def test_cooldown_memory_is_pruned(store, llm):
+    service = make_service(store, llm, FakeHub())
+    for i in range(5):
+        service.handle_segment(
+            TranscriptSegment(speaker="A", text=f"Nethys, mitä Trip {i} tekee?", t=i * 100)
+        )
+    await drain()
+    assert len(service._last_asked) == 1

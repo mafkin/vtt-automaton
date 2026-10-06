@@ -15,7 +15,7 @@ uv run uvicorn --factory app.main:app_factory --port 8765
 
 ### Rules database
 
-The rules DB is imported from Archives of Nethys (Remaster versions only, ~29k entries, ~130 MB,
+The rules DB is imported from Archives of Nethys (Remaster versions only, ~29k entries, ~65 MB,
 about a minute). The running backend checks for a new AoN build on startup and every
 `VTT_RULES_REFRESH_HOURS`, and only re-imports when AoN has changed. To import by hand:
 

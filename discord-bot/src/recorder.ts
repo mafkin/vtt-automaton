@@ -5,7 +5,7 @@ import type { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { EndBehaviorType } from "@discordjs/voice";
 import prism from "prism-media";
-import { BYTES_PER_SECOND_MONO, UtteranceBuffer, encodeWav, pcmSeconds, stereoToMono } from "./audio.js";
+import { BYTES_PER_SECOND_MONO, UtteranceBuffer, encodeWav, pcmSeconds } from "./audio.js";
 import type { UtteranceMeta } from "./clients.js";
 
 /** The parts of @discordjs/voice's VoiceReceiver the recorder uses (a fake in tests). */
@@ -29,7 +29,7 @@ export interface RecorderOptions {
   speakerInfo: (userId: string) => Promise<SpeakerInfo>;
   isOptedOut: (userId: string) => boolean;
   ignoreUserIds?: Set<string>;
-  /** Opus → 48 kHz stereo s16le PCM. */
+  /** Opus → 48 kHz mono s16le PCM. */
   decoder?: () => Transform;
   /** Pause that ends an utterance. */
   silenceMs?: number;
@@ -41,8 +41,10 @@ export interface RecorderOptions {
   log?: (message: string) => void;
 }
 
+// Discord sends stereo Opus; libopus can decode it straight to mono, which is cheaper than
+// decoding stereo and mixing it down in JavaScript.
 const opusDecoder = (): Transform =>
-  new prism.opus.Decoder({ rate: 48_000, channels: 2, frameSize: 960 }) as unknown as Transform;
+  new prism.opus.Decoder({ rate: 48_000, channels: 1, frameSize: 960 }) as unknown as Transform;
 
 export class Recorder {
   utterances = 0;
@@ -98,8 +100,8 @@ export class Recorder {
     };
 
     const decoder = this.o.decoder();
-    decoder.on("data", (stereo: Buffer) => {
-      for (const piece of buffer.push(stereoToMono(stereo))) send(piece);
+    decoder.on("data", (pcm: Buffer) => {
+      for (const piece of buffer.push(pcm)) send(piece);
     });
     pipeline(opus, decoder)
       .catch((error: Error) => this.o.log(`Audio stream from ${userId} failed: ${error.message}`))

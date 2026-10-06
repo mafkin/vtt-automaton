@@ -62,8 +62,8 @@ _SOURCE_FIELDS = [
 
 _INSERT_SQL = """
 INSERT OR REPLACE INTO entries
-    (id, category, name, aon_url, traits, text, markdown, source, legacy)
-VALUES (:id, :category, :name, :aon_url, :traits, :text, :markdown, :source, :legacy)
+    (id, category, name, aon_url, traits, text, source, legacy)
+VALUES (:id, :category, :name, :aon_url, :traits, :text, :source, :legacy)
 """
 
 
@@ -140,7 +140,6 @@ def to_row(doc: dict) -> dict | None:
         "aon_url": AON_SITE_URL + url if url.startswith("/") else url,
         "traits": json.dumps(doc.get("trait") or []),
         "text": text,
-        "markdown": markdown,
         "source": doc.get("primary_source_raw"),
         "legacy": int(bool(sources) and sources <= LEGACY_SOURCES),
     }
