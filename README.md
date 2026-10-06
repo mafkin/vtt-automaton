@@ -134,6 +134,8 @@ To enable it on the server:
    (`stat -c %g /var/run/docker.sock`; the setup script fills it in; the dashboard's container
    list needs it), then `docker compose up -d --build`.
 
+Known issues, measured costs and recommendations from testing: [docs/COMIC-KNOWN-ISSUES.md](docs/COMIC-KNOWN-ISSUES.md).
+
 Tests: `cd comic && uv run pytest`.
 
 ## Foundry module
