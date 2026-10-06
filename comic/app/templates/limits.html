@@ -1,0 +1,12 @@
+<form id="limits" hx-post="/api/v1/limits" hx-swap="outerHTML" class="flex flex-wrap items-end gap-4">
+    <label class="block">
+        <span class="text-sm text-slate-400">Token budget per comic for drawing (page images + lettering checks; a page is ~5,500)</span>
+        <input type="number" min="0" step="1000" name="token_budget_per_comic" value="{{ limits.token_budget_per_comic }}" class="block bg-slate-700 text-white p-2 rounded">
+    </label>
+    <label class="block">
+        <span class="text-sm text-slate-400">Automatic redraws when lettering is wrong (0-3)</span>
+        <input type="number" min="0" max="3" name="max_auto_redraws_per_page" value="{{ limits.max_auto_redraws_per_page }}" class="block bg-slate-700 text-white p-2 rounded">
+    </label>
+    <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded">Save limits</button>
+    {% if message %}<span class="{{ 'text-green-400' if message == 'Saved.' else 'text-red-400' }} font-bold">{{ message }}</span>{% endif %}
+</form>

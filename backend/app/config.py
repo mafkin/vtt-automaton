@@ -14,10 +14,6 @@ class Settings(BaseSettings):
     rules_db_path: Path = Path("data/pf2e_remaster.db")
     # The table's own data: sessions and transcripts.
     sessions_db_path: Path = Path("data/sessions.db")
-    # While the comic worker holds the GPU it writes comic.lock next to sessions.db; there is
-    # no transcription then, so new sessions are refused. A lock older than this is left over
-    # from a crash and ignored (the comic job timeout is 4 h).
-    comic_lock_max_age_seconds: float = 5 * 3600
 
     # Tokens issued to clients (one per Foundry world / Discord guild), comma separated.
     client_tokens: Annotated[list[str], NoDecode] = Field(default_factory=list)

@@ -1,0 +1,87 @@
+<div id="comic-{{ c.id }}" class="space-y-4 border-t border-slate-600 pt-4"
+     {% if busy %}hx-get="/api/v1/comics/{{ c.id }}" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+    <div class="flex flex-wrap justify-between gap-2">
+        <h3 class="text-lg font-semibold text-white">{{ c.label }}</h3>
+        <span class="text-sm text-slate-400" title="Drawing (page images and lettering checks) counts against the budget; reading the transcript and writing the script do not.">drawing {{ c.image_tokens }} / {{ budget }} tokens · text {{ c.text_tokens }}</span>
+    </div>
+    {% if notice %}<p class="text-amber-400 font-bold">{{ notice }}</p>{% endif %}
+    {% if c.message %}
+    <p class="{{ 'text-amber-400' if c.status == 'budget' else 'text-red-400' }} font-bold">{{ c.message }}</p>
+    {% endif %}
+
+    {% if busy %}
+    <p class="text-amber-400">
+        Working: {{ {"extracting": "reading the transcript", "scripting": "writing the script", "drawing": "drawing pages"}[c.status] }}…
+        <span class="text-slate-400 text-sm">(if this never changes, check the comic-worker logs)</span>
+    </p>
+    {% endif %}
+
+    {% if c.moments and not c.script %}
+    <!-- Step 2: choose moments -->
+    <details class="bg-slate-900 p-3 rounded"><summary class="cursor-pointer text-slate-300">What happened</summary>
+        <pre class="whitespace-pre-wrap text-sm text-slate-300 mt-2">{{ c.events }}</pre>
+    </details>
+    <form hx-post="/api/v1/comics/{{ c.id }}/script" hx-target="#comic-{{ c.id }}" hx-swap="outerHTML" class="space-y-2">
+        <p class="text-slate-300">Choose the moments to draw (one page each):</p>
+        {% for m in c.moments %}
+        <label class="flex gap-2 bg-slate-700 p-2 rounded">
+            <input type="checkbox" name="chosen" value="{{ loop.index0 }}">
+            <span><b class="text-white">{{ m.title }}</b> <span class="text-sm text-slate-300">{{ m.summary }}</span></span>
+        </label>
+        {% endfor %}
+        <textarea name="own" rows="2" placeholder="Or describe a moment of your own" class="w-full bg-slate-700 text-white p-2 rounded"></textarea>
+        <button type="submit" {% if busy %}disabled{% endif %} class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded">Write script</button>
+    </form>
+    {% endif %}
+
+    {% if c.script %}
+    <!-- Step 3: the script, editable; step 4: the pages -->
+    <form hx-post="/api/v1/comics/{{ c.id }}/script/save" hx-target="#comic-{{ c.id }}" hx-swap="outerHTML" class="space-y-6">
+        {% for page in c.script %}{% set i = loop.index0 %}
+        <div class="bg-slate-700 p-4 rounded space-y-3">
+            <div class="flex flex-wrap gap-2">
+                <input name="page-{{ i }}-title" value="{{ page.title }}" class="flex-1 bg-slate-800 text-white p-2 rounded font-bold">
+                <input name="page-{{ i }}-characters" value="{{ page.characters | join(', ') }}" title="Characters on this page (their reference images are used)" class="flex-1 bg-slate-800 text-white p-2 rounded">
+            </div>
+            {% for panel in page.panels %}{% set j = loop.index0 %}
+            <div class="grid md:grid-cols-2 gap-2">
+                <textarea name="page-{{ i }}-panel-{{ j }}-visual" rows="3" class="bg-slate-800 text-white p-2 rounded text-sm">{{ panel.visual }}</textarea>
+                <textarea name="page-{{ i }}-panel-{{ j }}-balloons" rows="3" placeholder="Speaker: text (one balloon per line)" class="bg-slate-800 text-white p-2 rounded text-sm">{% for b in panel.balloons %}{{ b.speaker }}: {{ b.text }}
+{% endfor %}</textarea>
+            </div>
+            {% endfor %}
+            {% set state = c.pages[i] if i < c.pages | length else None %}
+            {% if state and state.current %}
+            <div class="flex flex-wrap items-start gap-4">
+                <a href="/api/v1/comics/{{ c.id }}/pages/{{ state.current }}" target="_blank">
+                    <img src="/api/v1/comics/{{ c.id }}/pages/{{ state.current }}" class="h-72 rounded border border-slate-600" alt="Page {{ i + 1 }}">
+                </a>
+                <div class="text-sm space-y-1">
+                    <p class="{{ 'text-green-400' if state.check == 'ok' else 'text-amber-400' }}">Lettering: {{ state.check or "not checked" }}</p>
+                    {% if state.versions | length > 1 %}
+                    <p class="text-slate-400">Earlier versions:
+                        {% for v in state.versions[:-1] %}<a class="underline" href="/api/v1/comics/{{ c.id }}/pages/{{ v }}" target="_blank">{{ loop.index }}</a> {% endfor %}
+                    </p>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+            <div class="flex flex-wrap gap-2">
+                <input name="extra-{{ i }}" placeholder="Extra instruction for a redraw" class="flex-1 bg-slate-800 text-white p-2 rounded text-sm">
+                <button type="button" {% if busy %}disabled{% endif %}
+                        hx-post="/api/v1/comics/{{ c.id }}/draw" hx-vals='{"page": "{{ i }}"}' hx-include="[name='extra-{{ i }}']"
+                        hx-target="#comic-{{ c.id }}" hx-swap="outerHTML"
+                        class="bg-slate-500 hover:bg-slate-400 text-white px-3 py-1 rounded">{{ "Redraw page" if state and state.current else "Draw this page" }}</button>
+            </div>
+        </div>
+        {% endfor %}
+        <div class="flex flex-wrap gap-2">
+            <button type="submit" {% if busy %}disabled{% endif %} class="bg-slate-500 hover:bg-slate-400 text-white px-4 py-2 rounded">Save script</button>
+            <button type="button" {% if busy %}disabled{% endif %}
+                    hx-post="/api/v1/comics/{{ c.id }}/draw" hx-target="#comic-{{ c.id }}" hx-swap="outerHTML"
+                    hx-confirm="Draw all {{ c.script | length }} page(s)? Your script edits are saved first."
+                    class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded">Draw all pages</button>
+        </div>
+    </form>
+    {% endif %}
+</div>

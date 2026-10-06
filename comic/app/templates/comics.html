@@ -1,0 +1,37 @@
+<div id="comics" class="space-y-6">
+    {% if sessions %}
+    <form hx-post="/api/v1/comics" hx-target="#comic-view" class="space-y-3">
+        <select name="session_id" hx-get="/api/v1/dashboard/transcript" hx-trigger="load, change"
+                hx-target="#transcript-preview" class="w-full bg-slate-700 text-white p-2 rounded">
+            {% for s in sessions %}
+            <option value='{{ s.id }}'>{{ s.label or "Unnamed Session" }} – {{ s.segments }} lines</option>
+            {% endfor %}
+        </select>
+        <pre id="transcript-preview" class="text-sm text-slate-300 whitespace-pre-wrap bg-slate-900 p-3 rounded max-h-48 overflow-y-auto"></pre>
+        <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded">Start comic</button>
+        <span class="text-sm text-slate-400">Reads the transcript and suggests moments; nothing is drawn yet.</span>
+    </form>
+    {% else %}
+    <p class="text-slate-400">No finished sessions with a transcript yet.</p>
+    {% endif %}
+
+    {% if comics %}
+    <div>
+        <h3 class="text-lg font-semibold text-white mb-2">Comics</h3>
+        <ul class="space-y-2">
+            {% for c in comics %}
+            <li class="flex flex-wrap justify-between gap-2 bg-slate-700 p-3 rounded">
+                <button hx-get="/api/v1/comics/{{ c.id }}" hx-target="#comic-view" class="text-left text-white font-bold hover:underline">
+                    {{ c.label }}
+                </button>
+                <span class="text-sm {{ 'text-amber-400' if c.status in busy else 'text-slate-400' }}">
+                    {{ c.status }} · {{ c.script | length }} page(s) · drawing {{ c.image_tokens }} / {{ budget }} tokens
+                </span>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <div id="comic-view"></div>
+</div>

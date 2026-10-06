@@ -71,29 +71,46 @@ Tests: `cd discord-bot && npm ci && npm test`, `cd stt-worker && uv run pytest`.
 
 ## Comic generation (experimental)
 
-Turns a finished session's transcript into comic panels: Gemini writes a beat sheet and panel
-scripts, ComfyUI renders each panel with SDXL on the GPU, and speech bubbles are drawn on top.
+Turns a finished session's transcript into comic pages, step by step on the dashboard
+(`http://127.0.0.1:8771/dashboard`, on the server only):
 
-A comic is started by hand and runs in **comic mode**: once the script is written, the worker
-stops the speech-to-text container, starts ComfyUI, renders, then stops ComfyUI and starts
-speech-to-text again (also when rendering fails). While comic mode is on, transcription is
-unavailable and the Discord bot refuses `/session start`; a comic can't start while a session
-is recording. Between comics ComfyUI isn't running, so the GPU is left to speech-to-text.
+1. **Start comic** on a finished session. Gemini reads the transcript (it copes with
+   speech-recognition errors and missing speaker names), writes down what happened in the game
+   and suggests moments worth a page.
+2. **Choose moments** (one page each), or describe your own. Gemini writes the script: a title,
+   4-6 panels with a scene description and speech balloons per page.
+3. **Edit the script** right there: titles, which characters are on each page, panel
+   descriptions, balloons (`Speaker: text`, one per line).
+4. **Draw**: `GEMINI_IMAGE_MODEL` draws each page in one go from the script and the reference
+   images of the characters on it. The lettering is read back and compared with the script; a
+   page whose lettering doesn't match is redrawn automatically (once by default). Any page can
+   be redrawn with an extra instruction; earlier versions are kept.
+
+Pages and the comic's state are in `data/comic/comics/<id>/`. Comics don't use the local GPU,
+so they can be made while a session is recording.
+
+**Comic bible.** The Comic Bible card holds what carries over from one comic to the next
+(`data/comic/bible.json`): the setting and tone, the art style and things to avoid, the
+language of the speech balloons, and the characters, with names and aliases as they appear in
+transcripts, a short appearance text and reference images. Reference images should show only
+the character; **Draft description from images** lets Gemini write the appearance text.
+
+**Limits.** Drawing is what can run away, so a comic's page images and their lettering checks
+are charged to its token budget (Limits card, default 80,000 per comic; a page is about 5,500,
+so a 10-page comic with a few redraws fits).
+Drawing stops with "Budget reached" before a page that would go over it. Reading the transcript
+and writing the script are single calls per step; their tokens are shown but not budgeted (a
+whole session is about 30,000).
 
 To enable it on the server:
 
 1. `cp comic/.env.example comic/.env` and set `GEMINI_API_KEY`.
-2. Put an SDXL checkpoint at `data/comfyui/models/checkpoints/sdxl.safetensors`.
-3. Add `comic` to `COMPOSE_PROFILES` in `.env` (e.g. `COMPOSE_PROFILES=transcription,comic`;
+2. Add `comic` to `COMPOSE_PROFILES` in `.env` (e.g. `COMPOSE_PROFILES=transcription,comic`;
    the setup script keeps it) and set `DOCKER_GID` to the group of `/var/run/docker.sock`
-   (`stat -c %g /var/run/docker.sock`; the setup script fills it in), then
-   `docker compose up -d --build`.
-4. Open `http://127.0.0.1:8771/dashboard` on the server, pick a finished session's transcript
-   and press **Generate comic** (8–10 pages) or **Test run** (1–2 pages), or run
-   `python3 scripts/trigger_comic.py [--test] [session-id]`.
+   (`stat -c %g /var/run/docker.sock`; the setup script fills it in; the dashboard's container
+   list needs it), then `docker compose up -d --build`.
 
-Panels land in `data/comfyui/output/` (`*_lettered.png` has the bubbles). Page assembly and
-delivery to Foundry/Discord aren't built yet. Tests: `cd comic && uv run pytest`.
+Tests: `cd comic && uv run pytest`.
 
 ## Foundry module
 

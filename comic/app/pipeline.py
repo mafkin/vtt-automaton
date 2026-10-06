@@ -1,75 +1,106 @@
+"""The comic steps the worker runs: extract events, write the script, draw pages.
+
+Each step loads the comic, does its Gemini calls (counting their tokens; drawing is checked
+against the comic's budget before every page), saves the result and leaves the comic in a
+state the dashboard can show. A step never leaves the comic "busy": failures end as "failed",
+an exhausted budget as "budget".
+"""
+
 import asyncio
 import logging
-import os
-import re
+from collections.abc import Awaitable, Callable
 
-from app.comfy import generate_comfy_prompt, queue_prompt, wait_for_completion
-from app.config import settings
-from app.gpu import comic_mode
-from app.layout import layout_bubbles
-from app.llm import FULL_PAGES, TEST_PAGES, generate_beat_sheet, generate_page_detail
+from app import bible as bible_store
+from app import comics
+from app.bible import Bible
+from app.comics import BudgetExceeded, Comic, Moment
+from app.llm import draw_page, extract_events, lettering_problems, read_lettering, write_script
 from app.sessions import transcript as get_transcript
 
 logger = logging.getLogger(__name__)
 
-
-async def run_pipeline(session_id: str, test: bool = False):
-    """Write and render a comic. A test run is 1-2 pages and named apart from full comics."""
-    transcript = get_transcript(session_id)
-    if not transcript.strip():
-        logger.warning(f"No transcript found for session {session_id}")
-        return
-
-    logger.info(f"Loaded transcript for {session_id}, length: {len(transcript)}")
-
-    # The Gemini calls are blocking; run them in a thread so the worker stays responsive.
-    loop = asyncio.get_running_loop()
-
-    page_range = TEST_PAGES if test else FULL_PAGES
-    beat_sheet = await loop.run_in_executor(None, generate_beat_sheet, transcript, page_range)
-    logger.info(f"Generated beat sheet with {len(beat_sheet.pages)} pages")
-    # Gemini doesn't always keep to the count; never render more than asked for.
-    outlines = beat_sheet.pages[: page_range[1]]
-
-    pages = []
-    for p in outlines:
-        page_detail = await loop.run_in_executor(None, generate_page_detail, p, transcript)
-        pages.append(page_detail)
-
-    # Only the rendering needs the GPU: transcription is unavailable from here until it ends.
-    async with comic_mode(session_id):
-        for page in pages:
-            for panel in page.panels:
-                prefix = f"comic_{session_id}{'_test' if test else ''}_p{page.page_number}"
-                await render_panel(f"{prefix}_pan{panel.panel_number}", panel)
-
-    logger.info("Pipeline complete.")
+# Tokens to have left before drawing a page. Measured on the server: ~5,500 per page (prompt with
+# the cast's reference images, the image, the lettering check), rounded up.
+PAGE_ESTIMATE = 6000
 
 
-async def render_panel(prefix: str, panel):
-    logger.info(f"Rendering {prefix}")
-    prompt = generate_comfy_prompt(panel.image_prompt, prefix)
-    res, client_id = await queue_prompt(prompt)
-    prompt_id = res.get("prompt_id")
-    if prompt_id:
-        success = await wait_for_completion(prompt_id, client_id)
-        if not success:
-            logger.error(f"Panel {panel.panel_number} failed to render.")
-        else:
-            img_path = latest_output(prefix)
-            if img_path is None:
-                logger.error(f"Rendered {prefix} but found no output file")
-            else:
-                layout_bubbles(img_path, panel.speech_bubbles)
+async def _run(comic_id: str, busy: str, step: Callable[[Comic], Awaitable[str]]) -> None:
+    """Run one step: mark the comic busy, then save the state the step ends in."""
+    comic = comics.load(comic_id)
+    comic.status, comic.message = busy, ""
+    comics.save(comic)
+    try:
+        comic.status = await step(comic)
+    except BudgetExceeded as exc:
+        comic.status, comic.message = "budget", str(exc)
+    except Exception as exc:  # shown on the dashboard instead of a stuck "busy" comic
+        logger.exception("Comic %s: %s failed", comic_id, busy)
+        comic.status, comic.message = "failed", f"{type(exc).__name__}: {exc}"[:500]
+    comics.save(comic)
 
 
-def latest_output(prefix: str) -> str | None:
-    """The newest render of a prefix: ComfyUI never overwrites, it counts up
-    (<prefix>_00001_.png, then _00002_ when the same session is rendered again)."""
-    pattern = re.compile(rf"{re.escape(prefix)}_(\d+)_\.png")
-    counters = [
-        (int(m.group(1)), name)
-        for name in os.listdir(settings.comfy_output_dir)
-        if (m := pattern.fullmatch(name))
+async def extract(comic_id: str) -> None:
+    async def step(comic: Comic) -> str:
+        bible = bible_store.load()
+        transcript = get_transcript(comic.session_id)
+        if not transcript.strip():
+            raise ValueError("The session has no transcript")
+        result, tokens = await asyncio.to_thread(extract_events, transcript, bible)
+        comics.charge(comic, tokens, "text")
+        comic.events, comic.moments = result.events, result.moments
+        return "events"
+
+    await _run(comic_id, "extracting", step)
+
+
+async def script(comic_id: str, chosen: list[int], own: str = "") -> None:
+    async def step(comic: Comic) -> str:
+        moments = [comic.moments[i] for i in chosen if 0 <= i < len(comic.moments)]
+        if own.strip():
+            moments.append(Moment(title=own.strip()))
+        if not moments:
+            raise ValueError("Choose at least one moment")
+        pages, tokens = await asyncio.to_thread(
+            write_script, comic.events, moments, bible_store.load()
+        )
+        comics.charge(comic, tokens, "text")
+        comic.script, comic.pages = pages, []
+        return "script"
+
+    await _run(comic_id, "scripting", step)
+
+
+async def draw(comic_id: str, page_index: int | None = None, extra: str = "") -> None:
+    """Draw every page, or just one (a redraw, optionally with an extra instruction)."""
+
+    async def step(comic: Comic) -> str:
+        bible = bible_store.load()
+        indices = range(len(comic.script)) if page_index is None else [page_index]
+        for i in indices:
+            await _draw_page(comic, i, bible, extra)
+        return "done"
+
+    await _run(comic_id, "drawing", step)
+
+
+async def _draw_page(comic: Comic, index: int, bible: Bible, extra: str) -> None:
+    page = comic.script[index]
+    cast = [
+        (c, bible_store.image_path(c.id, c.images[0]).read_bytes())
+        for c in bible.match(page.characters)
+        if c.images
     ]
-    return os.path.join(settings.comfy_output_dir, max(counters)[1]) if counters else None
+    attempts = 1 + comics.load_limits().max_auto_redraws_per_page
+    for attempt in range(attempts):
+        comics.ensure_budget(comic, PAGE_ESTIMATE)
+        png, tokens = await asyncio.to_thread(draw_page, page, bible, cast, extra)
+        comics.charge(comic, tokens, "image")
+        comics.add_page_version(comic, index, png)
+        read, tokens = await asyncio.to_thread(read_lettering, png)
+        comics.charge(comic, tokens, "image")  # part of drawing: it decides on redraws
+        problems = lettering_problems(page, read)
+        comic.pages[index].check = "; ".join(problems) or "ok"
+        comics.save(comic)
+        if not problems:
+            return
+        logger.info("Comic %s page %d attempt %d: %s", comic.id, index + 1, attempt + 1, problems)

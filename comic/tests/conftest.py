@@ -44,16 +44,7 @@ def sessions_db(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def comic_lock(tmp_path, monkeypatch):
-    path = tmp_path / "comic.lock"
-    monkeypatch.setattr(settings, "lock_path", str(path))
+def bible_dir(tmp_path, monkeypatch):
+    path = tmp_path / "comic"
+    monkeypatch.setattr(settings, "bible_dir", str(path))
     return path
-
-
-@pytest.fixture
-def no_live_sessions(sessions_db):
-    """The usual fixture, with the live session ended: nothing blocks a comic."""
-    with sqlite3.connect(sessions_db) as conn:
-        conn.execute("UPDATE sessions SET ended_at = ? WHERE id = 'live1'", (time.time(),))
-    conn.close()
-    return sessions_db

@@ -50,13 +50,6 @@ class TranscriptChoice:
     segments: int
 
 
-def any_live() -> bool:
-    """Is any session recording? Then STT is in use and the GPU can't be borrowed."""
-    with closing(_connect()) as conn:
-        row = conn.execute("SELECT 1 FROM sessions WHERE ended_at IS NULL LIMIT 1").fetchone()
-    return row is not None
-
-
 def ended_sessions_with_transcripts() -> list[TranscriptChoice]:
     """Finished sessions that have something to make a comic of, newest first."""
     with closing(_connect()) as conn:

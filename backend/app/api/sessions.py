@@ -1,4 +1,3 @@
-import time
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -6,7 +5,6 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from app.api.auth import require_client
-from app.config import Settings
 from app.sessions.store import Session, SessionStore, StoredSegment, format_transcript
 
 router = APIRouter(prefix="/api/v1/sessions", dependencies=[Depends(require_client)])
@@ -31,21 +29,8 @@ def _require(store: SessionStore, session_id: str) -> Session:
     return session
 
 
-def comic_in_progress(settings: Settings) -> bool:
-    """Is the comic worker holding the GPU (speech-to-text stopped)?"""
-    lock = settings.sessions_db_path.parent / "comic.lock"
-    try:
-        age = time.time() - lock.stat().st_mtime
-    except FileNotFoundError:
-        return False
-    return age < settings.comic_lock_max_age_seconds
-
-
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=Session)
-async def start_session(body: StartSession, store: Store, request: Request) -> Session:
-    if comic_in_progress(request.app.state.settings):
-        # Clients match on this detail to tell the table why (Discord bot: comicInProgress).
-        raise HTTPException(status.HTTP_409_CONFLICT, detail="comic_in_progress")
+async def start_session(body: StartSession, store: Store) -> Session:
     return store.start(label=body.label, source=body.source)
 
 
