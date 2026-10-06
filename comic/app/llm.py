@@ -63,7 +63,10 @@ def bible_context(bible: Bible) -> str:
         for c in bible.characters:
             also = f" (also: {', '.join(c.aliases)})" if c.aliases else ""
             look = f": {c.appearance}" if c.appearance else ""
-            lines.append(f"- {c.name}{also}{look}")
+            spec = (f". Must have: {'; '.join(c.traits)}" if c.traits else "") + (
+                f". Never: {'; '.join(c.never)}" if c.never else ""
+            )
+            lines.append(f"- {c.name}{also}{look}{spec}")
     return "\n".join(lines)
 
 
@@ -123,6 +126,8 @@ For each page:
 - "panels": 4-6 panels. Each has "visual": a concrete description of the scene (where, who
   stands where doing what, camera angle, the place's architecture as the setting describes it),
   and "balloons": 0-2 speech balloons, each with "speaker" and "text".
+Panel descriptions must agree with each character's must-haves and never list (weapons,
+armour, clothing): the page drawer follows them.
 Write fresh, punchy dialogue in {bible.bubble_language}, at most ~10 words per balloon. Don't
 quote the transcript verbatim: it is full of recognition errors. Build each page to a payoff in
 its last panel."""

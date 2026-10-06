@@ -1,6 +1,6 @@
 from app.bible import Bible, Character, Style
 from app.comics import Balloon, Moment, ScriptPage, ScriptPanel
-from app.llm import draw_prompt, events_prompt, lettering_problems, script_prompt
+from app.llm import bible_context, draw_prompt, events_prompt, lettering_problems, script_prompt
 
 
 def campaign() -> Bible:
@@ -222,3 +222,14 @@ def test_sheet_prompt_includes_the_never_list():
     pentik = bible.characters[0]
     pentik.never = ["a tabard or cloth over the breastplate"]
     assert "Never: a tabard or cloth over the breastplate" in sheet_prompt(pentik, bible)
+
+
+def test_the_script_writer_knows_each_characters_must_haves_and_never_list():
+    # The test comic's script had Pentik "pointing his sword" while his spec says flail.
+    bible = campaign()
+    bible.characters[0].traits = ["flail"]
+    bible.characters[0].never = ["a sword"]
+    context = bible_context(bible)
+    assert "Pentik: great helm. Must have: flail. Never: a sword" in context
+    p = script_prompt("1. Fight", [Moment(title="T")], bible)
+    assert "Never: a sword" in p and "must-haves" in p.lower()
