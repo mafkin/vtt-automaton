@@ -80,7 +80,7 @@ services:
     image: wollomatic/socket-proxy:1
     environment:
     - SP_ALLOW_POST=^/containers/.*-stt-worker-1/(start|stop)$
-    - SP_ALLOW_GET=^/containers/.*-stt-worker-1/json$
+    - SP_ALLOW_GET=^/containers/json$|^/containers/.*-stt-worker-1/json$
     volumes:
     - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: unless-stopped
