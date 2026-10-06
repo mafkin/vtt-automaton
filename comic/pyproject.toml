@@ -1,0 +1,32 @@
+[project]
+name = "vtt-automaton-comic"
+version = "0.1.0"
+description = "Comic generation API and worker"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "httpx>=0.27",
+    "arq>=0.26",
+    "redis>=5.0",
+    "websockets>=13.0",
+    "pillow>=10.0",
+    "google-genai>=1.0"
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

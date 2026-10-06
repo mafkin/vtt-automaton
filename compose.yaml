@@ -1,6 +1,3 @@
-# Home-server deployment.
-# The "transcription" profile adds the Discord bot and the GPU speech-to-text worker; enable it
-# with COMPOSE_PROFILES=transcription in .env (scripts/setup-server.sh does this).
 services:
   backend:
     build: ./backend
@@ -9,46 +6,41 @@ services:
       VTT_RULES_DB_PATH: /data/pf2e_remaster.db
       VTT_SESSIONS_DB_PATH: /data/sessions.db
     volumes:
-      # Read-write: the backend refreshes the rules DB and stores session transcripts here.
-      - ./data:/data
-    # Localhost only, for curl testing on the server. Public access goes through cloudflared.
+    - ./data:/data
     ports:
-      - "127.0.0.1:8765:8765"
+    - 127.0.0.1:8765:8765
     restart: unless-stopped
-
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel --no-autoupdate run
     environment:
-      # Tunnel token from Cloudflare Zero Trust -> Networks -> Tunnels. In the tunnel's
-      # Public Hostname settings, point arbiter.ttrpg-arbiter.org at http://backend:8765
       TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env}
     depends_on:
-      - backend
+    - backend
     restart: unless-stopped
-
   stt-worker:
-    profiles: [transcription]
+    profiles:
+    - transcription
     build: ./stt-worker
     env_file: ./stt-worker/.env
     environment:
       STT_BACKEND_URL: http://backend:8765
     volumes:
-      - whisper-models:/models # model download (~3 GB for large-v3) survives rebuilds
-    # Needs the NVIDIA driver and NVIDIA Container Toolkit on the host.
+    - whisper-models:/models
     deploy:
       resources:
         reservations:
           devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+          - driver: nvidia
+            count: 1
+            capabilities:
+            - gpu
     depends_on:
-      - backend
+    - backend
     restart: unless-stopped
-
   discord-bot:
-    profiles: [transcription]
+    profiles:
+    - transcription
     build: ./discord-bot
     env_file: ./discord-bot/.env
     environment:
@@ -56,11 +48,74 @@ services:
       STT_URL: http://stt-worker:8770
       DATA_DIR: /data
     volumes:
-      - ./data/discord-bot:/data
+    - ./data/discord-bot:/data
     depends_on:
-      - backend
-      - stt-worker
+    - backend
+    - stt-worker
     restart: unless-stopped
-
+  redis:
+    profiles:
+    - comic
+    image: redis:7-alpine
+    restart: unless-stopped
+  comfyui:
+    profiles:
+    - comic
+    build: ./comic/comfyui
+    volumes:
+    - ./data/comfyui/models:/app/models
+    - ./data/comfyui/output:/app/output
+    deploy:
+      resources:
+        reservations:
+          devices:
+          - driver: nvidia
+            count: 1
+            capabilities:
+            - gpu
+    restart: unless-stopped
+  docker-proxy:
+    profiles:
+    - comic
+    image: wollomatic/socket-proxy:1
+    environment:
+    - SP_ALLOW_POST=^/containers/.*-stt-worker-1/(start|stop)$
+    - SP_ALLOW_GET=^/containers/.*-stt-worker-1/json$
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+  comic-api:
+    profiles:
+    - comic
+    build: ./comic
+    command: uvicorn app.api:app --host 0.0.0.0 --port 8771
+    env_file: ./comic/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+    - ./data:/data
+    depends_on:
+    - backend
+    - redis
+    restart: unless-stopped
+  comic-worker:
+    profiles:
+    - comic
+    build: ./comic
+    command: arq app.worker.WorkerSettings
+    env_file: ./comic/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      COMFYUI_URL: http://comfyui:8188
+      DOCKER_PROXY_URL: http://docker-proxy:2375
+      STT_CONTAINER_NAME: vtt-automaton-comic-stt-worker-1
+    volumes:
+    - ./data:/data
+    - ./data/comfyui/output:/comfy_output
+    depends_on:
+    - backend
+    - redis
+    - docker-proxy
+    restart: unless-stopped
 volumes:
-  whisper-models:
+  whisper-models: null
