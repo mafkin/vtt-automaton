@@ -4,7 +4,7 @@ import os
 
 from app.comfy import generate_comfy_prompt, queue_prompt, wait_for_completion
 from app.config import settings
-from app.gpu import gpu_lease
+from app.gpu import comic_mode
 from app.layout import layout_bubbles
 from app.llm import generate_beat_sheet, generate_page_detail
 from app.sessions import transcript as get_transcript
@@ -31,8 +31,8 @@ async def run_pipeline(session_id: str):
         page_detail = await loop.run_in_executor(None, generate_page_detail, p, transcript)
         pages.append(page_detail)
 
-    # GPU execution
-    async with gpu_lease():
+    # Only the rendering needs the GPU: transcription is unavailable from here until it ends.
+    async with comic_mode(session_id):
         for page in pages:
             for panel in page.panels:
                 await render_panel(session_id, page.page_number, panel)

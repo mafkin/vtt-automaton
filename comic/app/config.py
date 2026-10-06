@@ -14,6 +14,15 @@ class Settings(BaseSettings):
     # The speech-to-text container that holds the GPU between sessions. compose.yaml gives it
     # this fixed name. Empty = no handover (transcription not installed).
     stt_container_name: str = "vtt-stt-worker"
+    # ComfyUI only runs during a comic: the worker starts it and stops it again, which is what
+    # releases its VRAM. compose.yaml gives it this fixed name.
+    comfyui_container_name: str = "vtt-comfyui"
+    # Seconds to wait for ComfyUI to answer after starting its container.
+    comfyui_start_timeout: float = 180
+
+    # Exists while a comic holds the GPU. On the shared data volume, so the backend can refuse
+    # to start a session (no transcription) while it is there.
+    lock_path: str = "/data/comic.lock"
 
     sessions_db_path: str = "/data/sessions.db"
     comfy_output_dir: str = "/comfy_output"

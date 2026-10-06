@@ -42,6 +42,32 @@ def recent_sessions(limit: int = 5) -> list[SessionInfo]:
     return [SessionInfo(**dict(r)) for r in rows]
 
 
+@dataclass(frozen=True)
+class TranscriptChoice:
+    id: str
+    label: str | None
+    started_at: float
+    segments: int
+
+
+def any_live() -> bool:
+    """Is any session recording? Then STT is in use and the GPU can't be borrowed."""
+    with closing(_connect()) as conn:
+        row = conn.execute("SELECT 1 FROM sessions WHERE ended_at IS NULL LIMIT 1").fetchone()
+    return row is not None
+
+
+def ended_sessions_with_transcripts() -> list[TranscriptChoice]:
+    """Finished sessions that have something to make a comic of, newest first."""
+    with closing(_connect()) as conn:
+        rows = conn.execute(
+            "SELECT s.id, s.label, s.started_at, COUNT(g.id) AS segments FROM sessions s "
+            "JOIN segments g ON g.session_id = s.id WHERE s.ended_at IS NOT NULL "
+            "GROUP BY s.id ORDER BY s.started_at DESC"
+        ).fetchall()
+    return [TranscriptChoice(**dict(r)) for r in rows]
+
+
 def transcript(session_id: str) -> str:
     with closing(_connect()) as conn:
         rows = conn.execute(

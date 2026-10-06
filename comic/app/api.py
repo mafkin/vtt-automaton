@@ -1,7 +1,9 @@
 import contextlib
 import sqlite3
 from collections.abc import AsyncIterator
+from datetime import datetime
 from html import escape
+from urllib.parse import parse_qs
 
 import httpx
 from arq import create_pool
@@ -11,7 +13,14 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import settings
-from app.sessions import get_session, recent_sessions
+from app.gpu import lock_info
+from app.sessions import (
+    any_live,
+    ended_sessions_with_transcripts,
+    get_session,
+    recent_sessions,
+    transcript,
+)
 
 
 @contextlib.asynccontextmanager
@@ -24,6 +33,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="VTT Comic API", lifespan=lifespan)
 templates = Jinja2Templates(directory="app/templates")
+
+# Transcript lines shown when picking a session.
+PREVIEW_LINES = 10
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -60,25 +72,86 @@ async def get_sessions() -> str:
         return f"<p class='text-red-500'>Error loading sessions: {escape(str(exc))}</p>"
     items = []
     for s in sessions:
-        # A live session can't get a comic: rendering needs the GPU the transcription is using.
-        action = (
-            "<span class='text-amber-400'>Live (stop it first)</span>"
+        state = (
+            "<span class='text-amber-400'>Live</span>"
             if s.live
-            else f"<button hx-post='/api/v1/comic/{escape(s.id)}' hx-swap='outerHTML' "
-            "class='bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded transition'>"
-            "Generate Comic</button>"
+            else "<span class='text-slate-400'>Ended</span>"
         )
         items.append(
             "<li class='bg-slate-700 p-4 rounded flex items-center justify-between'>"
             f"<div><div class='font-bold text-white'>{escape(s.label or 'Unnamed Session')}</div>"
-            f"<div class='text-sm text-slate-400'>ID: {escape(s.id)}</div></div>"
-            f"<div class='flex items-center gap-4'>{action}</div></li>"
+            f"<div class='text-sm text-slate-400'>ID: {escape(s.id)}</div></div>{state}</li>"
         )
     return "<ul class='space-y-4'>" + "".join(items) + "</ul>"
 
 
-@app.post("/api/v1/comic/{session_id}", status_code=status.HTTP_202_ACCEPTED)
-async def trigger_comic_generation(session_id: str, request: Request):
+def _blocked_reason() -> str | None:
+    """Why no comic can start right now, or None."""
+    if lock_info() is not None:
+        return "Comic in progress"
+    if any_live():
+        return "Session live"
+    return None
+
+
+@app.get("/api/v1/dashboard/mode", response_class=HTMLResponse)
+async def get_mode() -> str:
+    lock = lock_info()
+    if lock is None:
+        return "<span class='text-green-400 font-bold'>Idle</span> – transcription available"
+    session = escape(str(lock.get("session_id") or "unknown session"))
+    return (
+        f"<span class='text-amber-400 font-bold'>Comic mode</span> – rendering {session}, "
+        "transcription unavailable until it finishes"
+    )
+
+
+@app.get("/api/v1/dashboard/picker", response_class=HTMLResponse)
+async def get_picker() -> str:
+    try:
+        choices = ended_sessions_with_transcripts()
+        blocked = _blocked_reason()
+    except sqlite3.Error as exc:
+        return f"<p class='text-red-500'>Error loading transcripts: {escape(str(exc))}</p>"
+    if not choices:
+        return "<p class='text-slate-400'>No finished sessions with a transcript yet.</p>"
+    options = "".join(
+        f"<option value='{escape(c.id)}'>{escape(c.label or 'Unnamed Session')} – "
+        f"{datetime.fromtimestamp(c.started_at):%-d.%-m.%Y} – {c.segments} lines</option>"
+        for c in choices
+    )
+    button = (
+        "<button type='submit' class='bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 "
+        "rounded transition disabled:bg-slate-600 disabled:cursor-not-allowed'"
+        + (" disabled" if blocked else "")
+        + ">Generate comic</button>"
+    )
+    reason = f"<span class='text-amber-400'>{escape(blocked)}</span>" if blocked else ""
+    return (
+        "<form hx-post='/api/v1/dashboard/generate' hx-target='#generate-result' "
+        "class='space-y-4'>"
+        "<select name='session_id' hx-get='/api/v1/dashboard/transcript' "
+        "hx-trigger='load, change' hx-target='#transcript-preview' "
+        "class='w-full bg-slate-700 text-white p-2 rounded'>"
+        f"{options}</select>"
+        f"<div class='flex items-center gap-4'>{button}{reason}"
+        "<span id='generate-result'></span></div></form>"
+        "<pre id='transcript-preview' class='mt-4 text-sm text-slate-300 whitespace-pre-wrap "
+        "bg-slate-900 p-3 rounded'></pre>"
+    )
+
+
+@app.get("/api/v1/dashboard/transcript", response_class=HTMLResponse)
+async def get_transcript_preview(session_id: str) -> str:
+    if get_session(session_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown session")
+    lines = transcript(session_id).splitlines()
+    more = f"\n… {len(lines) - PREVIEW_LINES} more lines" if len(lines) > PREVIEW_LINES else ""
+    return escape("\n".join(lines[:PREVIEW_LINES]) + more)
+
+
+async def _queue_comic(request: Request, session_id: str) -> bool:
+    """Queue a comic for a finished session. Returns False if it is already queued/running."""
     session = get_session(session_id)
     if session is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Unknown session")
@@ -87,11 +160,36 @@ async def trigger_comic_generation(session_id: str, request: Request):
             status.HTTP_409_CONFLICT,
             detail="Session is still recording; stop it first (/session stop)",
         )
+    if lock_info() is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="A comic is already being rendered")
+    if any_live():
+        # Rendering stops STT, which would cut off the session that is recording.
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="A session is recording")
     # One job per session at a time: arq ignores a job id that is already queued or running.
     job = await request.app.state.queue.enqueue_job(
         "generate_comic", session_id, _job_id=f"comic:{session_id}"
     )
-    if request.headers.get("hx-request"):
-        message = "Queued! Check worker logs." if job else "Already queued or running."
-        return HTMLResponse(f"<span class='text-green-400 font-bold'>{message}</span>")
-    return {"status": "accepted" if job else "already_queued", "session_id": session_id}
+    return job is not None
+
+
+@app.post("/api/v1/dashboard/generate", response_class=HTMLResponse)
+async def generate_from_dashboard(request: Request) -> str:
+    # htmx posts the form URL-encoded; parsed here to avoid a python-multipart dependency.
+    form = parse_qs((await request.body()).decode())
+    session_id = (form.get("session_id") or [""])[0]
+    try:
+        queued = await _queue_comic(request, session_id)
+    except HTTPException as exc:
+        return f"<span class='text-red-400 font-bold'>{escape(str(exc.detail))}</span>"
+    message = (
+        "Queued – comic mode starts after the script is written."
+        if queued
+        else ("Already queued or running.")
+    )
+    return f"<span class='text-green-400 font-bold'>{message}</span>"
+
+
+@app.post("/api/v1/comic/{session_id}", status_code=status.HTTP_202_ACCEPTED)
+async def trigger_comic_generation(session_id: str, request: Request):
+    queued = await _queue_comic(request, session_id)
+    return {"status": "accepted" if queued else "already_queued", "session_id": session_id}
