@@ -39,6 +39,8 @@ export interface RecorderOptions {
   minSeconds?: number;
   now?: () => number;
   log?: (message: string) => void;
+  /** Every received Opus packet, before decoding (podcast tracks). */
+  onPacket?: (userId: string, opus: Buffer) => void;
 }
 
 // Discord sends stereo Opus; libopus can decode it straight to mono, which is cheaper than
@@ -52,7 +54,10 @@ export class Recorder {
   private readonly streams = new Map<string, Readable>();
   private readonly inflight = new Set<Promise<void>>();
   private stopped = false;
-  private readonly o: Required<Omit<RecorderOptions, "ignoreUserIds">> & { ignoreUserIds: Set<string> };
+  private readonly o: Required<Omit<RecorderOptions, "ignoreUserIds" | "onPacket">> & {
+    ignoreUserIds: Set<string>;
+    onPacket?: (userId: string, opus: Buffer) => void;
+  };
 
   constructor(options: RecorderOptions) {
     this.o = {
@@ -99,6 +104,8 @@ export class Recorder {
       tStart += pcmSeconds(pcm);
     };
 
+    const onPacket = this.o.onPacket;
+    if (onPacket) opus.on("data", (packet: Buffer) => onPacket(userId, packet));
     const decoder = this.o.decoder();
     decoder.on("data", (pcm: Buffer) => {
       for (const piece of buffer.push(pcm)) send(piece);

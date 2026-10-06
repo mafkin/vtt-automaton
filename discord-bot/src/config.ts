@@ -6,6 +6,8 @@ export interface Config {
   sttUrl: string;
   sttToken: string;
   dataDir: string;
+  /** Podcast tracks: <dir>/<session>/tracks/<userId>.ogg and manifest.json. */
+  recordingsDir: string;
   /** Stop recording after the voice channel has had no people in it for this long. */
   emptyChannelMinutes: number;
 }
@@ -25,6 +27,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     sttUrl: (env.STT_URL ?? "http://stt-worker:8770").replace(/\/+$/, ""),
     sttToken: required(env, "STT_TOKEN"),
     dataDir: env.DATA_DIR ?? "data",
+    recordingsDir: env.RECORDINGS_DIR ?? `${env.DATA_DIR ?? "data"}/recordings`,
     emptyChannelMinutes: Number(env.EMPTY_CHANNEL_MINUTES ?? 5),
   };
 }

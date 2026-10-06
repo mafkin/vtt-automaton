@@ -65,8 +65,11 @@ services:
       BACKEND_URL: http://backend:8765
       STT_URL: http://stt-worker:8770
       DATA_DIR: /data
+      RECORDINGS_DIR: /recordings
     volumes:
       - ./data/discord-bot:/data
+      # Podcast tracks (sessions started with podcast:true): <session>/tracks/<user>.ogg
+      - ./data/recordings:/recordings
     depends_on:
       - backend
       - stt-worker

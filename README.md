@@ -57,14 +57,17 @@ In Discord, join the voice channel and use:
 
 | Command | What it does |
 |---|---|
-| `/session start [label]` | Bot joins your voice channel and starts transcribing each speaker |
+| `/session start [label] [podcast]` | Bot joins your voice channel and starts transcribing each speaker; `podcast:true` also records podcast tracks |
 | `/session stop` | Stops, and posts the transcript as a text file in the channel |
 | `/session status` | Duration, speakers, lines transcribed so far |
 | `/session transcript` | Posts the latest session's transcript again |
 | `/link character:<name>` | Your character's name, shown next to yours in the transcript |
 | `/optout`, `/optin` | Leave yourself out of recording, or back in |
+| `/podcast join`, `/podcast leave` | Consent to podcast tracks, or withdraw (your unpublished tracks are deleted) |
 
-No audio is saved; clips live in memory only until transcribed. Saying "Nethys, …" during a
+Without `podcast:true` no audio is saved; clips live in memory only until transcribed. With
+it, each speaker who ran `/podcast join` gets their own track in `data/recordings/` for
+podcast episodes ([docs/PODCAST.md](docs/PODCAST.md)). Saying "Nethys, …" during a
 session asks the rules arbiter, and the ruling appears in Foundry.
 
 Tests: `cd discord-bot && npm ci && npm test`, `cd stt-worker && uv run pytest`.

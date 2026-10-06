@@ -5,10 +5,12 @@ import { TranscriptionBot } from "./bot.js";
 import { BackendClient, SttClient } from "./clients.js";
 import { commands } from "./commands.js";
 import { loadConfig } from "./config.js";
+import { installRtpTap } from "./rtp.js";
 import { UserStore } from "./store.js";
 
 const config = loadConfig();
 console.log(generateDependencyReport());
+installRtpTap();
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
 const bot = new TranscriptionBot(
