@@ -112,7 +112,7 @@ def page_detail_prompt(
 
     Translate these beats into 3 to 5 comic book panels.
     For each panel, provide:
-    - An 'image_prompt' suitable for a text-to-image AI (focus on visual composition, setting, lighting, character actions). The characters' looks are added automatically from the character sheet, so don't describe their clothes or faces.
+    - An 'image_prompt' suitable for a text-to-image AI (focus on visual composition, setting, lighting, character actions). Always name the location and its architecture as the campaign setting describes it, so the place looks right even when a character's clothing comes from another culture. The characters' looks are added automatically from the character sheet, so don't describe their clothes or faces.
     - A 'character_focus' list of which character(s) are the visual subject of the panel, using the exact names from the character list. Try to stick to 1 or 2 characters max to avoid blending.
     - 'speech_bubbles' with dialogue drawn from or inspired by the transcript, written in {language}.
     - An optional 'caption', written in {language}.

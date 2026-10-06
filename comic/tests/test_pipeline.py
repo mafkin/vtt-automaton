@@ -183,3 +183,10 @@ def test_the_appearance_draft_leaves_out_pose_and_lighting():
     prompt = describe_prompt("Rintaro", "carries a katana")
     assert "pose" in prompt and "viewpoint" in prompt and "lighting" in prompt
     assert "carries a katana" in prompt and "at most 40 words" in prompt
+
+
+def test_image_prompts_must_restate_the_campaign_setting():
+    # In the first bible test run, a kimono in the appearance text turned Restov Japanese.
+    outline = PageOutline(page_number=1, beats=[])
+    prompt = page_detail_prompt(outline, "", "Setting: Restov", "Finnish")
+    assert "name the location and its architecture as the campaign setting describes it" in prompt
