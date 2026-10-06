@@ -341,11 +341,13 @@ def describe_character(
 
 def sheet_prompt(character: Character, bible: Bible) -> str:
     traits = "; ".join(character.traits)
+    never = "; ".join(character.never)
     return f"""Draw a character model sheet of {character.name} for a comic: full body seen from
 the front, in three-quarter view and from the side, standing in a neutral pose, side by side
 on a plain light background. The same character in every view.
 Look: {character.appearance or "as in the reference images"}.
 {f"Must have: {traits}." if traits else ""}
+{f"Never: {never}." if never else ""}
 Art style: {bible.style.positive}. Avoid: {bible.style.negative}.
 The reference images show this character; keep their design, but draw it in the art style
 above. No text, no labels, no other characters."""

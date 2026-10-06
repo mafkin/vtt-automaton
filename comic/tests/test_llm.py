@@ -215,3 +215,10 @@ def test_events_prompt_uses_speaker_tags_as_characters():
 def test_description_draft_asks_for_exact_must_haves():
     p = describe_prompt("Pentik", "")
     assert "shape, colour and position" in p
+
+
+def test_sheet_prompt_includes_the_never_list():
+    bible = campaign()
+    pentik = bible.characters[0]
+    pentik.never = ["a tabard or cloth over the breastplate"]
+    assert "Never: a tabard or cloth over the breastplate" in sheet_prompt(pentik, bible)
