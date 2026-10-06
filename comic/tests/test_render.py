@@ -43,3 +43,27 @@ def test_workflow_with_a_reference_steers_through_ip_adapter():
     # Found in the spike: 0.5 up to 80% of the steps keeps the prompt's scene.
     assert adapter["inputs"]["weight"] == 0.5 and adapter["inputs"]["end_at"] == 0.8
     assert wf["3"]["inputs"]["model"] == [adapter_key, 0]
+
+
+def test_the_bubble_font_has_finnish_letters():
+    # Pillow's built-in font draws ä and ö as the missing-glyph box.
+    from app.layout import bubble_font
+
+    font = bubble_font()
+
+    def mask(ch):
+        return bytes(font.getmask(ch))
+
+    missing = mask("")  # private-use code point: never in a font
+    assert all(mask(ch) != missing for ch in "äöåÄÖÅ")
+
+
+def test_long_bubbles_wrap_inside_the_panel():
+    from app.layout import bubble_font, wrap
+
+    font = bubble_font()
+    text = "Jessan: Tämä kala maistuu ihan paskalta, viekää minut heti keittiöön kokin luo! " * 2
+    lines = wrap(text, font, 500)
+    assert len(lines) > 1
+    assert all(font.getlength(line) <= 500 for line in lines)
+    assert " ".join(lines) == text.strip()
