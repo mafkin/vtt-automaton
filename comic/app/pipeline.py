@@ -15,7 +15,14 @@ from app import bible as bible_store
 from app import comics
 from app.bible import Bible
 from app.comics import BudgetExceeded, Comic, Moment, VersionInfo
-from app.llm import draw_page, extract_events, inspect_page, lettering_problems, write_script
+from app.llm import (
+    draw_page,
+    extract_events,
+    inspect_page,
+    lettering_problems,
+    page_cast,
+    write_script,
+)
 from app.sessions import transcript as get_transcript
 
 logger = logging.getLogger(__name__)
@@ -86,18 +93,26 @@ async def draw(comic_id: str, page_index: int | None = None, extra: str = "") ->
     await _run(comic_id, "drawing", step)
 
 
+def _refs_label(c, count: int) -> str:
+    """What a page version was drawn with, e.g. "sheet_3.png + detail_4.png + 1 image"."""
+    sheets = [name for name in (c.sheet, c.detail) if name]
+    images = count - len(sheets)
+    return " + ".join(sheets + ([f"{images} image{'s' if images > 1 else ''}"] if images else []))
+
+
 async def _draw_page(
     comic: Comic, index: int, bible: Bible, extra: str, anchor: bytes | None, round_id: str
 ) -> None:
     page = comic.script[index]
-    characters = bible.match(page.characters)
-    # Each character's labelled references: the approved sheet (or first image), then details.
-    cast = [(c, refs) for c in characters if (refs := bible_store.references(c))]
-    refs = {c.name: " + ".join(filter(None, [c.sheet or "image", c.detail])) for c, _ in cast}
+    limits = comics.load_limits()
+    characters = page_cast(page, bible)
+    # Each character's labelled references: the approved sheet and details, then their own
+    # first images. A character without any is still drawn, from their rules.
+    cast = [(c, bible_store.references(c, limits.page_reference_images)) for c in characters]
+    refs = {c.name: _refs_label(c, len(r)) for c, r in cast if r}
     # Continuity: the page before this one as it is now (just drawn in this round, or current).
     previous_name = comic.pages[index - 1].current if 0 < index <= len(comic.pages) else None
     previous = comics.page_path(comic.id, previous_name).read_bytes() if previous_name else None
-    limits = comics.load_limits()
     instruction = extra
     for attempt in range(1 + limits.max_auto_redraws_per_page):
         comics.ensure_budget(comic, PAGE_ESTIMATE)

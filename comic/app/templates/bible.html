@@ -93,9 +93,15 @@
                 </div>
             </form>
             <div class="flex flex-wrap gap-3">
+                {% set on_pages = own_images if c.sheet else [own_images, 1] | max %}
                 {% for img in c.images %}
                 <div class="relative">
-                    <img src="/api/v1/bible/characters/{{ c.id }}/images/{{ img }}" class="h-24 rounded border border-slate-600" alt="{{ c.name }}">
+                    <img src="/api/v1/bible/characters/{{ c.id }}/images/{{ img }}" class="h-24 rounded border {{ 'border-green-400 border-2' if loop.index0 < on_pages else 'border-slate-600' }}" alt="{{ c.name }}">
+                    {% if loop.index0 < on_pages %}<span class="absolute bottom-0 left-0 bg-green-700 text-white text-xs px-1 rounded">on pages</span>{% endif %}
+                    {% if not loop.first %}
+                    <button hx-post="/api/v1/bible/characters/{{ c.id }}/images/{{ img }}/first" hx-target="#bible" hx-swap="outerHTML"
+                            class="absolute top-0 left-0 bg-slate-600 text-white text-xs px-1 rounded" title="Make this the first image">⇤ first</button>
+                    {% endif %}
                     <button hx-post="/api/v1/bible/characters/{{ c.id }}/images/{{ img }}/delete" hx-target="#bible" hx-swap="outerHTML"
                             class="absolute top-0 right-0 bg-red-700 text-white text-xs px-1 rounded" title="Remove image">✕</button>
                 </div>
@@ -129,7 +135,8 @@
                 {% endif %}
                 <span id="sheet-busy-{{ c.id }}" class="htmx-indicator text-amber-400 text-sm">Drawing… (about 30 s)</span>
                 <span class="text-sm text-slate-400">
-                    {{ "Pages use the approved sheet" if c.sheet else "Pages use the first image until a sheet is approved" }}{{ " and detail sheet." if c.detail else "." }}
+                    {% if c.sheet %}Pages use the approved sheet{{ ", detail sheet" if c.detail }} and the images marked "on pages" (how many: Limits card).{% else %}Pages use the images marked "on pages" until a sheet is approved.{% endif %}
+                    Images with a transparent background are put on white; for best results upload the character alone.
                 </span>
             </div>
             <form hx-post="/api/v1/bible/characters/{{ c.id }}/images" hx-encoding="multipart/form-data"

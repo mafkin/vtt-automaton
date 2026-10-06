@@ -121,15 +121,24 @@ def test_sheet_paths_cannot_escape():
         bible.approve_sheet(ch.id, "sheet_9.png")
 
 
-def test_the_reference_is_the_approved_sheet_else_the_first_image():
+def colours(refs):
+    return [Image.open(io.BytesIO(data)).getpixel((0, 0)) for _, data in refs]
+
+
+def test_pages_get_the_sheet_and_the_first_own_images():
     ch = bible.add_character("Rintaro")
-    assert bible.reference_image(bible.load().character(ch.id)) is None
-    bible.add_image(ch.id, png(colour="red"))
-    ref = bible.reference_image(bible.load().character(ch.id))
-    assert Image.open(io.BytesIO(ref)).getpixel((0, 0)) == (255, 0, 0)
+    for colour in ("red", "yellow"):
+        bible.add_image(ch.id, png(colour=colour))
+    c = bible.load().character(ch.id)
+    # Without an approved sheet, at least the first image, whatever the setting.
+    assert colours(bible.references(c, originals=0)) == [(255, 0, 0)]
+    assert colours(bible.references(c, originals=2)) == [(255, 0, 0), (255, 255, 0)]
     bible.approve_sheet(ch.id, bible.add_sheet(ch.id, png(colour="blue")))
-    ref = bible.reference_image(bible.load().character(ch.id))
-    assert Image.open(io.BytesIO(ref)).getpixel((0, 0)) == (0, 0, 255)
+    c = bible.load().character(ch.id)
+    assert colours(bible.references(c, originals=0)) == [(0, 0, 255)]
+    refs = bible.references(c)  # the default: the sheet and the first own image
+    assert colours(refs) == [(0, 0, 255), (255, 0, 0)]
+    assert refs[1][0] == bible.ORIGINAL_LABEL and "not its drawing style" in refs[1][0]
 
 
 def test_style_anchor_set_read_and_clear(bible_dir):
@@ -192,9 +201,9 @@ def test_references_are_the_sheet_then_the_details():
     bible.approve_sheet(ch.id, bible.add_sheet(ch.id, png(colour="blue")))
     bible.approve_sheet(ch.id, bible.add_sheet(ch.id, png(colour="green"), kind="detail"))
     refs = bible.references(bible.load().character(ch.id))
-    assert [label for label, _ in refs] == ["full-body sheet", "close-ups of details"]
-    colours = [Image.open(io.BytesIO(data)).getpixel((0, 0)) for _, data in refs]
-    assert colours == [(0, 0, 255), (0, 128, 0)]
+    labels = [label for label, _ in refs]
+    assert labels == ["full-body sheet", "close-ups of details", bible.ORIGINAL_LABEL]
+    assert colours(refs) == [(0, 0, 255), (0, 128, 0), (255, 0, 0)]
 
 
 def test_height_is_kept_unless_given():
@@ -204,3 +213,50 @@ def test_height_is_kept_unless_given():
     assert bible.load().character(ch.id).height_cm == 60
     bible.update_character(ch.id, "Rintaro", [], "", height_cm=None)  # cleared
     assert bible.load().character(ch.id).height_cm is None
+
+
+# --- reference quality: uploads, the first images, finding characters in text -----------------
+
+
+def test_a_transparent_background_becomes_white_not_black():
+    # A cut-out character (a VTT token) used to land on black, hiding a dark outline.
+    buf = io.BytesIO()
+    image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    image.putpixel((32, 32), (90, 90, 90, 255))
+    image.save(buf, "PNG")
+    ch = bible.add_character("Rintaro")
+    name = bible.add_image(ch.id, buf.getvalue())
+    stored = Image.open(bible.image_path(ch.id, name))
+    assert stored.getpixel((0, 0)) == (255, 255, 255)
+    assert stored.getpixel((32, 32)) == (90, 90, 90)
+
+
+def test_a_phone_photo_is_stored_upright():
+    # Phones store the rotation in EXIF; re-encoding drops EXIF, so it must be applied first.
+    buf = io.BytesIO()
+    exif = Image.Exif()
+    exif[0x0112] = 6  # orientation: rotate 90° clockwise to view
+    Image.new("RGB", (80, 40), "red").save(buf, "JPEG", exif=exif)
+    ch = bible.add_character("Rintaro")
+    name = bible.add_image(ch.id, buf.getvalue())
+    assert Image.open(bible.image_path(ch.id, name)).size == (40, 80)
+
+
+def test_an_image_can_be_moved_first():
+    ch = bible.add_character("Rintaro")
+    first, second = bible.add_image(ch.id, png()), bible.add_image(ch.id, png(colour="blue"))
+    bible.move_image_first(ch.id, second)
+    assert bible.load().character(ch.id).images == [second, first]
+    with pytest.raises(KeyError):
+        bible.move_image_first(ch.id, "0123456789abcdef.png")
+
+
+def test_characters_are_found_by_whole_name_or_alias():
+    b = bible.Bible(
+        characters=[
+            bible.Character(id="rintaro", name="Rintaro", aliases=["Rin"]),
+            bible.Character(id="kal", name="Käl"),
+        ]
+    )
+    assert [c.id for c in b.mentioned("Rin's katana flashes; KÄL ducks")] == ["rintaro", "kal"]
+    assert b.mentioned("A rinse of water, a kale salad") == []

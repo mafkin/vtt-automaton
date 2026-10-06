@@ -5,11 +5,13 @@ budget (app.comics.charge). The prompt builders are plain functions so tests can
 """
 
 import difflib
+import io
 import logging
 import re
 
 from google import genai
 from google.genai import types
+from PIL import Image
 from pydantic import BaseModel
 
 from app.bible import Bible, Character
@@ -23,6 +25,11 @@ logger = logging.getLogger(__name__)
 # normalising case and punctuation); between NEAR and MATCH it's a misspelling of it.
 MATCH = 0.95
 NEAR = 0.75
+
+# Images sent to Gemini are scaled to this longest side and sent as JPEG. Gemini scales inputs
+# down anyway, and a request (all its images together) must stay under 20 MB: full-size PNG
+# sheets and pages for a cast of four, with 2K output, could pass it.
+INPUT_SIDE = 1536
 
 
 class EventsResult(BaseModel):
@@ -47,6 +54,29 @@ def _client() -> genai.Client:
     )
 
 
+def _image_part(data: bytes) -> types.Part:
+    image = Image.open(io.BytesIO(data)).convert("RGB")
+    image.thumbnail((INPUT_SIDE, INPUT_SIDE))
+    buf = io.BytesIO()
+    image.save(buf, "JPEG", quality=90)
+    return types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg")
+
+
+def _labelled_images(images: list[tuple[str, bytes]]) -> list[types.Part | str]:
+    """Each image right after its label: a model ties a label to the image next to it far more
+    reliably than to "image 3" of a list given before the text."""
+    parts: list[types.Part | str] = []
+    for label, data in images:
+        parts += [label, _image_part(data)]
+    return parts
+
+
+def _image_config(aspect_ratio: str) -> types.ImageConfig:
+    return types.ImageConfig(
+        aspect_ratio=aspect_ratio, image_size=settings.gemini_image_size or None
+    )
+
+
 def _tokens(response) -> int:
     usage = getattr(response, "usage_metadata", None)
     return (usage.total_token_count or 0) if usage else 0
@@ -60,7 +90,7 @@ def bible_context(bible: Bible) -> str:
     if bible.tone:
         lines.append(f"Tone: {bible.tone}")
     if bible.characters:
-        lines.append("Characters (use these exact names in character_focus):")
+        lines.append("Player characters (use these exact names):")
         for c in bible.characters:
             also = f" (also: {', '.join(c.aliases)})" if c.aliases else ""
             look = f": {c.appearance}" if c.appearance else ""
@@ -128,7 +158,9 @@ For each page:
 - "characters": the player characters who appear (exact names from the campaign list).
 - "panels": 4-6 panels. Each has "visual": a concrete description of the scene (where, who
   stands where doing what, camera angle, the place's architecture as the setting describes it),
-  and "balloons": 0-2 speech balloons, each with "speaker" and "text".
+  and "balloons": 0-2 speech balloons, each with "speaker" and "text". Name every player
+  character in a panel's visual by their exact name (not "the party" or "they"): the drawer
+  gets references only for the characters it names.
 Panel descriptions must agree with each character's must-haves and never list (weapons,
 armour, clothing): the page drawer follows them. Call a signature item by the exact words its
 must-have uses ("flail", "katana"), never by a generic or different word ("weapon", "sword",
@@ -153,6 +185,16 @@ def write_script(events: str, moments: list[Moment], bible: Bible) -> tuple[list
     return ScriptResult.model_validate_json(response.text).pages, _tokens(response)
 
 
+def page_cast(page: ScriptPage, bible: Bible) -> list[Character]:
+    """Everyone from the bible on a page: its character list, the balloons' speakers, and anyone
+    named in a panel description (the script writer doesn't always list everyone)."""
+    names = page.characters + [b.speaker for p in page.panels for b in p.balloons]
+    cast = bible.match(names)
+    for panel in page.panels:
+        cast += [c for c in bible.mentioned(panel.visual) if c not in cast]
+    return cast
+
+
 def _spec(c: Character) -> str:
     parts = []
     if c.traits:
@@ -173,14 +215,31 @@ def draw_prompt(
     previous: bool = False,
 ) -> str:
     """The page drawer's prompt. Images come in this order: each cast member's references (as
-    labelled), then the style anchor page if `anchor`, then the previous page if `previous`."""
-    lines, n = [], 0
+    labelled), then the style anchor page if `anchor`, then the previous page if `previous`.
+    Cast members without references are drawn from their rules alone."""
+    lines, n, which = [], 0, {}
     for c, labels in cast:
+        first = n + 1
         for label in labels:
             n += 1
             lines.append(f"Reference image {n} is {c.name.upper()} ({label})")
+        which[c.id] = (
+            f"reference image {first}"
+            if n == first
+            else f"reference images {first}-{n}"
+            if n > first
+            else "no reference image: draw from the rules"
+        )
+        if not labels:
+            lines.append(f"{c.name.upper()} has no reference image: draw them from these rules")
         if spec := _spec(c):
             lines.append(spec)
+    if cast:
+        lines.append(
+            'Anyone a panel doesn\'t list under "In this panel" is an unnamed extra (an NPC, a'
+            " bystander): give extras their own faces, hair, colours and gear, never a look-alike"
+            " of the characters above."
+        )
     if anchor:
         n += 1
         lines.append(
@@ -195,13 +254,28 @@ def draw_prompt(
             " where the previous page differs from them, follow the references, not the previous"
             " page. Don't copy its panels or text."
         )
-    panels = "\n".join(
-        f"Panel {i}: {p.visual}\n  Balloons: "
-        + (" | ".join(f'{b.speaker}: "{b.text}"' for b in p.balloons) or "(none)")
-        for i, p in enumerate(page.panels, 1)
-    )
+    characters = [c for c, _ in cast]
+
+    def speaker(name: str) -> str:
+        found = [c for c in bible.match([name]) if c in characters]
+        return found[0].name.upper() if found else name
+
+    def panel(i: int, p) -> str:
+        names = [speaker(b.speaker) for b in p.balloons] + [
+            c.name.upper() for c in bible.mentioned(p.visual) if c in characters
+        ]
+        present = [c for c in characters if c.name.upper() in names]
+        here = ", ".join(f"{c.name.upper()} ({which[c.id]})" for c in present)
+        balloons = " | ".join(f'{speaker(b.speaker)}: "{b.text}"' for b in p.balloons)
+        return (
+            f"Panel {i}: {p.visual}"
+            + (f"\n  In this panel: {here}" if here else "")
+            + f"\n  Balloons: {balloons or '(none)'}"
+        )
+
+    panels = "\n".join(panel(i, p) for i, p in enumerate(page.panels, 1))
     refs = "\n".join(lines)
-    sizes = scale_line(bible.match(page.characters))
+    sizes = scale_line(characters)
     if sizes:
         refs += f"\nSizes (these win over the reference images, which aren't to scale): {sizes}"
     return f"""Draw one finished comic page with {len(page.panels)} panels, clean gutters, and the
@@ -231,20 +305,20 @@ def draw_page(
     anchor: bytes | None = None,
     previous: bytes | None = None,
 ) -> tuple[bytes, int]:
-    """One page image (PNG) from the script, steered by each character's labelled references,
-    and optionally a style anchor page and the previous page of the comic."""
-    images = [png for _, refs in cast for _, png in refs]
-    images += [img for img in (anchor, previous) if img]
-    parts = [types.Part.from_bytes(data=png, mime_type="image/png") for png in images]
+    """One page image from the script, steered by each character's labelled references, and
+    optionally a style anchor page and the previous page of the comic."""
+    images = [(f"{c.name.upper()} ({label})", png) for c, refs in cast for label, png in refs]
+    images += [("STYLE REFERENCE page", anchor)] if anchor else []
+    images += [("PREVIOUS PAGE", previous)] if previous else []
+    images = [(f"Reference image {n}: {label}", png) for n, (label, png) in enumerate(images, 1)]
     labels = [(c, [label for label, _ in refs]) for c, refs in cast]
     prompt = draw_prompt(page, bible, labels, extra, bool(anchor), bool(previous))
     client = _client()
     response = client.models.generate_content(
         model=settings.gemini_image_model,
-        contents=[*parts, prompt],
+        contents=[*_labelled_images(images), prompt],
         config=types.GenerateContentConfig(
-            response_modalities=["IMAGE"],
-            image_config=types.ImageConfig(aspect_ratio="3:4"),
+            response_modalities=["IMAGE"], image_config=_image_config("3:4")
         ),
     )
     return _image_bytes(response), _tokens(response)
@@ -295,10 +369,7 @@ def inspect_page(
     client = _client()
     response = client.models.generate_content(
         model=settings.gemini_model,
-        contents=[
-            types.Part.from_bytes(data=png, mime_type="image/png"),
-            inspect_prompt(cast, look_check),
-        ],
+        contents=[_image_part(png), inspect_prompt(cast, look_check)],
         config=types.GenerateContentConfig(
             response_mime_type="application/json", response_schema=Inspection, temperature=0
         ),
@@ -356,7 +427,7 @@ def describe_character(
 ) -> tuple[CharacterDraft, int]:
     """Draft a short visual description and must-have traits from the reference images."""
     client = _client()
-    parts = [types.Part.from_bytes(data=img, mime_type="image/png") for img in images]
+    parts = [_image_part(img) for img in images]
     response = client.models.generate_content(
         model=settings.gemini_model,
         contents=[*parts, describe_prompt(name, notes)],
@@ -392,13 +463,16 @@ def _image_bytes(response) -> bytes:
 
 
 def draw_sheet(character: Character, images: list[bytes], bible: Bible) -> tuple[bytes, int]:
+    labelled = [
+        (f"Reference image {i} of {len(images)}: {character.name}", img)
+        for i, img in enumerate(images, 1)
+    ]
     client = _client()
-    parts = [types.Part.from_bytes(data=img, mime_type="image/png") for img in images]
     response = client.models.generate_content(
         model=settings.gemini_image_model,
-        contents=[*parts, sheet_prompt(character, bible)],
+        contents=[*_labelled_images(labelled), sheet_prompt(character, bible)],
         config=types.GenerateContentConfig(
-            response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="16:9")
+            response_modalities=["IMAGE"], image_config=_image_config("16:9")
         ),
     )
     return _image_bytes(response), _tokens(response)
@@ -422,13 +496,16 @@ Art style: {bible.style.positive}. No text, no labels, no other characters."""
 def draw_detail_sheet(
     character: Character, sheet: bytes, images: list[bytes], bible: Bible
 ) -> tuple[bytes, int]:
+    labelled = [(f"Image 1: the approved full-body sheet of {character.name}", sheet)] + [
+        (f"Image {i}: original reference of {character.name}", img)
+        for i, img in enumerate(images, 2)
+    ]
     client = _client()
-    parts = [types.Part.from_bytes(data=img, mime_type="image/png") for img in [sheet, *images]]
     response = client.models.generate_content(
         model=settings.gemini_image_model,
-        contents=[*parts, detail_sheet_prompt(character, bible)],
+        contents=[*_labelled_images(labelled), detail_sheet_prompt(character, bible)],
         config=types.GenerateContentConfig(
-            response_modalities=["IMAGE"], image_config=types.ImageConfig(aspect_ratio="16:9")
+            response_modalities=["IMAGE"], image_config=_image_config("16:9")
         ),
     )
     return _image_bytes(response), _tokens(response)

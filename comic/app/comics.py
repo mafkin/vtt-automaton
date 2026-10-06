@@ -40,6 +40,9 @@ class Limits(BaseModel):
     # Check each page's characters against their must-haves and never lists (same call as the
     # lettering check, so it costs little).
     look_check: bool = True
+    # Each character's own uploaded images (the first ones) sent with every page besides the
+    # approved sheets: the design as you gave it. Each costs a few hundred tokens per page.
+    page_reference_images: int = 1
 
 
 class Moment(BaseModel):

@@ -99,7 +99,11 @@ the character's **must-haves** (details the page drawer is told never to change)
 **Consistency.** Three things keep characters and pages looking the same:
 - **Character sheets:** **Draw character sheet** draws the character in the comic's own style
   (front, three-quarter and side view, plain background) from the reference images. Approve
-  one and every page uses it as the character's reference instead of the first image.
+  one and every page uses it as the character's reference. Pages also get the character's
+  first uploaded image ("on pages"; **⇤ first** picks it; how many: Limits card), the design
+  as you gave it, since a drawn sheet can drift from it.
+- **Who is where:** each panel tells the drawer which characters are in it and which
+  reference images are theirs; anyone else is an unnamed extra who must not look like them.
 - **Page look:** a fixed description of lettering, balloons, borders and page colour, added to
   every page.
 - **Style reference:** **Use as style reference** under a drawn page you like sends that page
