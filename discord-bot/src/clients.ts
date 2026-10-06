@@ -16,10 +16,22 @@ export interface UtteranceMeta {
   tStart: number;
 }
 
+// A non-2xx answer, keeping the status and body so callers can tell refusals apart.
+export class HttpError extends Error {
+  constructor(
+    what: string,
+    readonly status: number,
+    readonly body: string,
+  ) {
+    super(`${what} failed: HTTP ${status} ${body.slice(0, 200)}`);
+    this.name = "HttpError";
+  }
+}
+
 async function check(response: Response, what: string): Promise<Response> {
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new Error(`${what} failed: HTTP ${response.status} ${body.slice(0, 200)}`);
+    throw new HttpError(what, response.status, body);
   }
   return response;
 }

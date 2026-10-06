@@ -73,17 +73,24 @@ Tests: `cd discord-bot && npm ci && npm test`, `cd stt-worker && uv run pytest`.
 
 Turns a finished session's transcript into comic panels: Gemini writes a beat sheet and panel
 scripts, ComfyUI renders each panel with SDXL on the GPU, and speech bubbles are drawn on top.
-The worker borrows the GPU by stopping the speech-to-text container and starting it again
-afterwards, so it only runs for sessions that have ended.
+
+A comic is started by hand and runs in **comic mode**: once the script is written, the worker
+stops the speech-to-text container, starts ComfyUI, renders, then stops ComfyUI and starts
+speech-to-text again (also when rendering fails). While comic mode is on, transcription is
+unavailable and the Discord bot refuses `/session start`; a comic can't start while a session
+is recording. Between comics ComfyUI isn't running, so the GPU is left to speech-to-text.
 
 To enable it on the server:
 
 1. `cp comic/.env.example comic/.env` and set `GEMINI_API_KEY`.
 2. Put an SDXL checkpoint at `data/comfyui/models/checkpoints/sdxl.safetensors`.
 3. Add `comic` to `COMPOSE_PROFILES` in `.env` (e.g. `COMPOSE_PROFILES=transcription,comic`;
-   the setup script keeps it), then `docker compose up -d --build`.
-4. Open `http://127.0.0.1:8771/dashboard` on the server, or run
-   `python3 scripts/trigger_comic.py [session-id]`.
+   the setup script keeps it) and set `DOCKER_GID` to the group of `/var/run/docker.sock`
+   (`stat -c %g /var/run/docker.sock`; the setup script fills it in), then
+   `docker compose up -d --build`.
+4. Open `http://127.0.0.1:8771/dashboard` on the server, pick a finished session's transcript
+   and press **Generate comic** (8–10 pages) or **Test run** (1–2 pages), or run
+   `python3 scripts/trigger_comic.py [--test] [session-id]`.
 
 Panels land in `data/comfyui/output/` (`*_lettered.png` has the bubbles). Page assembly and
 delivery to Foundry/Discord aren't built yet. Tests: `cd comic && uv run pytest`.
