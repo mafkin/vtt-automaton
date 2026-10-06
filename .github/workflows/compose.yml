@@ -1,0 +1,32 @@
+name: compose
+
+on:
+  push:
+    paths: ["compose.yaml", "**/Dockerfile", ".github/workflows/compose.yml"]
+  pull_request:
+    paths: ["compose.yaml", "**/Dockerfile", ".github/workflows/compose.yml"]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder env files
+        run: |
+          echo "CLOUDFLARE_TUNNEL_TOKEN=ci" > .env
+          for dir in backend discord-bot stt-worker comic; do touch "$dir/.env"; done
+      - name: Validate every profile combination
+        run: |
+          for profiles in "" transcription comic transcription,comic; do
+            echo "::group::COMPOSE_PROFILES='$profiles'"
+            COMPOSE_PROFILES="$profiles" docker compose config --quiet
+            COMPOSE_PROFILES="$profiles" docker compose config --services
+            echo "::endgroup::"
+          done
+      - name: GPU handover names match
+        # The comic worker stops the STT container by name through docker-proxy; both must agree.
+        run: |
+          COMPOSE_PROFILES=transcription,comic docker compose config > resolved.yaml
+          grep -q "container_name: vtt-stt-worker" resolved.yaml
+          grep -q "vtt-stt-worker/(start|stop)" resolved.yaml
+          grep -q 'stt_container_name: str = "vtt-stt-worker"' comic/app/config.py

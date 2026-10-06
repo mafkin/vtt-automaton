@@ -1,38 +1,51 @@
 import logging
-from typing import List, Optional
-from pydantic import BaseModel, Field
+
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, Field
+
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+
 class NarrativeBeat(BaseModel):
     description: str = Field(..., description="Action or scene description")
-    characters: List[str] = Field(..., description="Characters present in the beat")
+    characters: list[str] = Field(..., description="Characters present in the beat")
+
 
 class PageOutline(BaseModel):
     page_number: int
-    beats: List[NarrativeBeat] = Field(..., description="3 to 5 narrative beats for this page")
+    beats: list[NarrativeBeat] = Field(..., description="3 to 5 narrative beats for this page")
+
 
 class BeatSheet(BaseModel):
-    pages: List[PageOutline]
+    pages: list[PageOutline]
+
 
 class Panel(BaseModel):
     panel_number: int
-    image_prompt: str = Field(..., description="SDXL prompt for the panel, focusing on visual details")
-    character_focus: List[str] = Field(..., description="Characters prominently featured in this panel")
-    speech_bubbles: List[str] = Field(..., description="Dialogue text to be placed in speech bubbles")
-    caption: Optional[str] = Field(None, description="Narrator caption text, if any")
+    image_prompt: str = Field(
+        ..., description="SDXL prompt for the panel, focusing on visual details"
+    )
+    character_focus: list[str] = Field(
+        ..., description="Characters prominently featured in this panel"
+    )
+    speech_bubbles: list[str] = Field(
+        ..., description="Dialogue text to be placed in speech bubbles"
+    )
+    caption: str | None = Field(None, description="Narrator caption text, if any")
+
 
 class PageDetail(BaseModel):
     page_number: int
-    panels: List[Panel]
+    panels: list[Panel]
+
 
 def generate_beat_sheet(transcript: str) -> BeatSheet:
     logger.info("Starting LLM Pass 1: Beat Sheet")
     client = genai.Client(api_key=settings.gemini_api_key)
-    
+
     prompt = f"""
     You are an expert comic book writer. Read the following TTRPG transcript and outline a comic book issue of 8-10 pages.
     Each page should have 3 to 5 distinct narrative beats. Focus on the most important actions and dialogues.
@@ -40,7 +53,7 @@ def generate_beat_sheet(transcript: str) -> BeatSheet:
     Transcript:
     {transcript}
     """
-    
+
     response = client.models.generate_content(
         model=settings.gemini_model,
         contents=prompt,
@@ -52,12 +65,15 @@ def generate_beat_sheet(transcript: str) -> BeatSheet:
     )
     return BeatSheet.model_validate_json(response.text)
 
+
 def generate_page_detail(page_outline: PageOutline, full_transcript: str) -> PageDetail:
     logger.info(f"Starting LLM Pass 2 for Page {page_outline.page_number}")
     client = genai.Client(api_key=settings.gemini_api_key)
-    
-    outline_str = "\n".join([f"- {b.description} (Characters: {', '.join(b.characters)})" for b in page_outline.beats])
-    
+
+    outline_str = "\n".join(
+        [f"- {b.description} (Characters: {', '.join(b.characters)})" for b in page_outline.beats]
+    )
+
     prompt = f"""
     You are an expert comic book script writer. You are writing page {page_outline.page_number}.
     Here is the outline for this page:
@@ -70,7 +86,7 @@ def generate_page_detail(page_outline: PageOutline, full_transcript: str) -> Pag
     - 'speech_bubbles' with exact dialogue drawn from or inspired by the transcript context.
     - An optional 'caption'.
     """
-    
+
     response = client.models.generate_content(
         model=settings.gemini_model,
         contents=prompt,
