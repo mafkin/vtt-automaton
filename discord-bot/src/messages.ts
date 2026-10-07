@@ -15,6 +15,23 @@ export const text = {
       "Et halua mukaan? Käytä `/optout`. Hahmon nimen saat litterointiin komennolla `/link`.",
       'Sääntökysymys: sano "Nethys, …" ja vastaus tulee Foundryyn.',
     ].join("\n"),
+  startedPodcast: (voiceChannelId: string, onTrack: string[], notOnTrack: string[]) =>
+    [
+      `🔴 **Nauhoitus alkoi** kanavalla <#${voiceChannelId}>, **podcast-äänitys päällä**.`,
+      `🎙️ Omille raidoilleen äänitetään: ${onTrack.join(", ") || "ei vielä ketään"}.`,
+      ...(notOnTrack.length
+        ? [`Vain litteroidaan (ei ääntä): ${notOnTrack.join(", ")}. Mukaan: \`/podcast join\`.`]
+        : []),
+      "Hahmon nimen saat litterointiin komennolla `/link`.",
+      'Sääntökysymys: sano "Nethys, …" ja vastaus tulee Foundryyn.',
+    ].join("\n"),
+  podcastTracks: (tracks: number) => ` Podcast-raitoja: ${tracks}.`,
+  podcastJoined:
+    "🎙️ Olet mukana podcast-äänityksissä: sessioissa, jotka aloitetaan `podcast`-valinnalla, " +
+    "puheesi tallennetaan omalle raidalleen ja siitä voidaan julkaista podcast-jakso. " +
+    "Peru milloin vain komennolla `/podcast leave`.",
+  podcastLeft: (deleted: number) =>
+    `Et ole enää mukana podcast-äänityksissä. Poistin julkaisemattomat raitasi (${deleted} kpl).`,
   stopped: (seconds: number, speakers: number, utterances: number) =>
     `⏹️ **Nauhoitus päättyi.** Kesto ${formatDuration(seconds)}, ${speakers} puhujaa, ` +
     `${utterances} puheenvuoroa. Litterointi tulee tähän kanavaan hetken kuluttua.`,

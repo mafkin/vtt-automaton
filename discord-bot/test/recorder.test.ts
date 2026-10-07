@@ -142,3 +142,14 @@ test("real Opus packets are decoded (opusscript) into the expected amount of aud
   for (let i = 0; i < pcm.length; i += 2) peak = Math.max(peak, Math.abs(pcm.readInt16LE(i)));
   assert.ok(peak > 2000, `peak ${peak}`);
 });
+
+test("raw packets go to the podcast tracks too, before decoding", async () => {
+  const seen: [string, number][] = [];
+  const { receiver } = setup({ onPacket: (userId, opus) => void seen.push([userId, opus.length]) });
+  receiver.speaking.emit("start", "1");
+  receiver.streams.get("1")!.push(Buffer.alloc(SECOND));
+  receiver.streams.get("1")!.push(null);
+  receiver.speaking.emit("start", "bot"); // ignored users never reach the tracks
+  await settle();
+  assert.deepEqual(seen, [["1", SECOND]]);
+});

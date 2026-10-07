@@ -17,7 +17,9 @@ import type { BackendClient, SttClient } from "./clients.js";
 import type { Config } from "./config.js";
 import { text } from "./messages.js";
 import { Recorder } from "./recorder.js";
+import { rtpInfo } from "./rtp.js";
 import type { UserStore } from "./store.js";
+import { SessionTracks, deleteSpeakerTracks } from "./track.js";
 
 // The STT queue needs a moment to finish the last utterances before the transcript is posted.
 const TRANSCRIPT_DELAY_MS = 20_000;
@@ -28,6 +30,8 @@ interface ActiveSession {
   startedAt: number;
   connection: VoiceConnection;
   recorder: Recorder;
+  /** Podcast tracks, when the session was started with podcast:true. */
+  tracks: SessionTracks | null;
   voiceChannelId: string;
   textChannel: SendableChannels | null;
   emptyTimer?: NodeJS.Timeout;
@@ -61,6 +65,20 @@ export class TranscriptionBot {
         this.users.setCharacter(interaction.user.id, name);
         await interaction.reply({
           content: name ? text.linked(name) : text.unlinked,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      case "podcast": {
+        const join = interaction.options.getSubcommand() === "join";
+        this.users.setPodcast(interaction.user.id, join);
+        let deleted = 0;
+        if (!join) {
+          for (const active of this.sessions.values()) active.tracks?.drop(interaction.user.id);
+          deleted = deleteSpeakerTracks(this.config.recordingsDir, interaction.user.id);
+        }
+        await interaction.reply({
+          content: join ? text.podcastJoined : text.podcastLeft(deleted),
           flags: MessageFlags.Ephemeral,
         });
         return;
@@ -115,6 +133,18 @@ export class TranscriptionBot {
       return;
     }
 
+    const startedAt = Date.now();
+    const tracks = interaction.options.getBoolean("podcast")
+      ? new SessionTracks(this.config.recordingsDir, session.id, session.label, startedAt, (userId) => {
+          const consent = this.users.podcastConsent(userId);
+          if (!consent) return null;
+          return {
+            speaker: guild.members.cache.get(userId)?.displayName ?? this.names.get(userId) ?? userId,
+            character: this.users.character(userId),
+            consentedAt: consent.at,
+          };
+        })
+      : null;
     const recorder = new Recorder({
       receiver: connection.receiver,
       sessionId: session.id,
@@ -125,21 +155,30 @@ export class TranscriptionBot {
       }),
       isOptedOut: (userId) => this.users.isOptedOut(userId),
       ignoreUserIds: new Set([this.client.user?.id ?? ""]),
+      ...(tracks ? { onPacket: (userId: string, opus: Buffer) => tracks.packet(userId, opus, rtpInfo(opus)) } : {}),
     });
     recorder.start();
 
     const active: ActiveSession = {
       id: session.id,
       label: session.label,
-      startedAt: Date.now(),
+      startedAt,
       connection,
       recorder,
+      tracks,
       voiceChannelId: voiceChannel.id,
       textChannel: interaction.channel?.isSendable() ? interaction.channel : null,
     };
     this.sessions.set(guild.id, active);
     this.watchConnection(guild.id, active);
-    await interaction.editReply(text.started(voiceChannel.id));
+    if (!tracks) {
+      await interaction.editReply(text.started(voiceChannel.id));
+      return;
+    }
+    const people = voiceChannel.members.filter((m) => !m.user.bot);
+    const on = people.filter((m) => this.users.podcastConsent(m.id)).map((m) => m.displayName);
+    const off = people.filter((m) => !this.users.podcastConsent(m.id)).map((m) => m.displayName);
+    await interaction.editReply(text.startedPodcast(voiceChannel.id, on, off));
   }
 
   private async stopCommand(interaction: ChatInputCommandInteraction<"cached">): Promise<void> {
@@ -159,13 +198,15 @@ export class TranscriptionBot {
     this.sessions.delete(guildId);
     clearTimeout(active.emptyTimer);
     await active.recorder.stop();
+    active.tracks?.stop();
     active.connection.destroy();
     await this.backend.stopSession(active.id).catch((error: Error) => {
       console.error(`Could not stop session ${active.id}: ${error.message}`);
     });
     const seconds = (Date.now() - active.startedAt) / 1000;
     setTimeout(() => void this.postTranscript(active.id, active.label, active.textChannel), TRANSCRIPT_DELAY_MS);
-    return text.stopped(seconds, active.recorder.speakers.size, active.recorder.utterances);
+    const summary = text.stopped(seconds, active.recorder.speakers.size, active.recorder.utterances);
+    return active.tracks ? summary + text.podcastTracks(active.tracks.speakers) : summary;
   }
 
   async stopAll(): Promise<void> {
