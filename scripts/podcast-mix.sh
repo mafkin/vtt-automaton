@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Mix a session's podcast tracks into one mono WAV, to check that the tracks line up
-# (docs/PODCAST.md: the clap test). Uses ffmpeg, or the linuxserver/ffmpeg image if ffmpeg
+# (docs/PODCAST.md: the sync test). Uses ffmpeg, or the linuxserver/ffmpeg image if ffmpeg
 # isn't installed.
 #   scripts/podcast-mix.sh data/recordings/<session-id> [out.wav]
 set -euo pipefail
