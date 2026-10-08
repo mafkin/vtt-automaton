@@ -21,7 +21,7 @@ Discord voice ──Opus packets──► discord-bot
 ## Phases
 | Phase | Status | Result |
 |---|---|---|
-| 0 Timing and tracks | **built**, awaiting the clap test on the server | Aligned per-speaker tracks, opt-in |
+| 0 Timing and tracks | **built**, awaiting the sync test on the server | Aligned per-speaker tracks, opt-in |
 | 1 Retention and disk | planned | Unpublished raw tracks deleted after N days; disk use on the dashboard |
 | 2 Rough mix | planned | Podcast card: levels, per-track nudge, a loudness-normalised mono MP3 |
 | 3 Editing to ~1.5 h | planned | Silence compressed, empty content cut, chapters, show notes, intro/outro |
@@ -45,18 +45,24 @@ Discord voice ──Opus packets──► discord-bot
   and tracks fall back to arrival times.
 - **What remains:** speakers differ by their network delay to Discord (typically 20–60 ms),
   which can't be measured from the server. Fine for conversation; phase 2 adds a per-track
-  nudge (and can align automatically on a clap at the start).
+  nudge (and can align automatically on a spoken marker at the start).
 
-### The clap test (do this before phase 1)
+### The sync test (do this before phase 1)
+Use a **spoken marker**, not a clap: the bot only hears what each Discord client sends, and
+Discord's noise suppression (Krisp) removes claps, while voice activity detection may not even
+open the microphone for one. A short, sharp word survives both.
 1. Deploy, and everyone in the test runs `/podcast join`.
-2. `/session start label:clap-test podcast:true` in the voice channel.
-3. Count down and everyone claps at once. Talk for a minute with pauses, clap again; one
-   person leaves and rejoins the channel, then clap once more.
+2. `/session start label:sync-test podcast:true` in the voice channel.
+3. Count down and everyone says **"TAK!"** at once. Talk for a minute with pauses, say "TAK!"
+   together again; one person leaves and rejoins the channel, then once more.
 4. `/session stop`, then on the server:
    `scripts/podcast-mix.sh data/recordings/<session-id>` and listen to `mix.wav`.
    The session id is the newest folder in `data/recordings/`.
-5. Good: each clap sounds like one clap, or a tight flam (under ~60 ms). Bad: claps drift apart
-   over the minute, or the rejoin breaks alignment. Report what you hear.
+5. Good: each "TAK!" sounds like one voice, or a tight cluster (under ~60 ms). Bad: they drift
+   apart over the minute, or the rejoin breaks alignment. Report what you hear.
+
+For exact numbers instead, everyone can set *User Settings → Voice & Video → Noise
+Suppression: None* and a fixed input sensitivity for the test; then claps work too.
 
 ### Phase 3 notes (decided)
 - Target length ~1.5 h from a 3-4 h session: silences longer than ~1.5 s are shortened to
