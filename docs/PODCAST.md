@@ -56,7 +56,8 @@ open the microphone for one. A short, sharp word survives both.
 3. Count down and everyone says **"TAK!"** at once. Talk for a minute with pauses, say "TAK!"
    together again; one person leaves and rejoins the channel, then once more.
 4. `/session stop`, then on the server:
-   `scripts/podcast-mix.sh data/recordings/<session-id>` and listen to `mix.wav`.
+   `scripts/podcast-mix.sh data/recordings/<session-id>` and listen to `mix.wav`. It uses
+   ffmpeg if installed (`apt-get install ffmpeg` / `pacman -S ffmpeg`), otherwise a Docker image.
    The session id is the newest folder in `data/recordings/`.
 5. Good: each "TAK!" sounds like one voice, or a tight cluster (under ~60 ms). Bad: they drift
    apart over the minute, or the rejoin breaks alignment. Report what you hear.

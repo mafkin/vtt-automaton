@@ -13,6 +13,11 @@ fails, fix it before moving on. Part C covers troubleshooting and maintenance.
 Throughout, **"the server"** means your home machine running Docker, and the public address is
 `https://arbiter.ttrpg-arbiter.org`.
 
+Everything runs in Docker, so the operating system only matters for installing Docker and the
+GPU driver. Where the steps differ, this guide gives them for **Ubuntu** (22.04 or 24.04 LTS) and
+for **Arch Linux / CachyOS** (the production server runs CachyOS). The commands are written for
+bash: CachyOS's default shell is fish, so run `bash` first there.
+
 ---
 
 ## Part A: Setup
@@ -21,7 +26,7 @@ Throughout, **"the server"** means your home machine running Docker, and the pub
 
 | Item | Notes |
 |---|---|
-| Server | Linux (e.g. Ubuntu 22.04 or 24.04) or Windows with WSL2. 4+ CPU cores, 16 GB RAM, ~15 GB free disk |
+| Server | Linux: Ubuntu 22.04/24.04 LTS or Arch Linux/CachyOS (others with Docker should work), or Windows with WSL2. 4+ CPU cores, 16 GB RAM, ~15 GB free disk |
 | NVIDIA GPU | Only for transcription. 6 GB+ VRAM recommended for `large-v3`; with less, see [C3](#c3-tuning) |
 | Cloudflare | `ttrpg-arbiter.org` on Cloudflare, a tunnel with public hostname `arbiter.ttrpg-arbiter.org` → `HTTP` `backend:8765` (already done) |
 | Gemini API key | [aistudio.google.com](https://aistudio.google.com) → *Get API key* |
@@ -35,19 +40,61 @@ The setup script generates the rest.
 
 ### A2. Install Docker on the server
 
+You need the Docker engine, the Compose plugin (`docker compose`) and buildx.
+
+**Ubuntu**: Docker's install script (Docker's own packages, with Compose and buildx):
+
 ```bash
 curl -fsSL https://get.docker.com | sh
+```
+
+or Ubuntu's packages, which are recent enough on both 22.04 and 24.04:
+
+```bash
+sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2 docker-buildx
+```
+
+Don't use the Docker *snap* that the Ubuntu Server installer offers: it confines file access and
+sets the GPU up differently from this guide. Check with `snap list docker`; if it's listed, run
+`sudo snap remove docker` before installing.
+
+**Arch Linux / CachyOS**: `docker` alone has no `docker compose`, and Docker's install script
+doesn't support Arch:
+
+```bash
+sudo pacman -S --needed docker docker-compose docker-buildx
+sudo systemctl enable --now docker.service    # Arch doesn't start it by itself
+```
+
+**Then, on both:**
+
+```bash
 sudo usermod -aG docker "$USER"     # then log out and back in
 docker run --rm hello-world         # should print "Hello from Docker!"
+docker compose version              # should print v2 or later
 ```
+
+No ports need opening in a firewall (ufw on Ubuntu, or any other): the Cloudflare tunnel connects
+outward, and the comic dashboard listens on 127.0.0.1 only.
 
 On Windows, install Docker Desktop with the WSL2 backend instead, and run every command in this
 guide inside your WSL Ubuntu shell.
 
 ### A3. GPU support for Docker (transcription only)
 
-1. Install the NVIDIA driver for your GPU and check it: `nvidia-smi` should list the card.
-2. Install the NVIDIA Container Toolkit (Ubuntu/Debian):
+1. Install the NVIDIA driver for your GPU, then reboot.
+
+   - **Ubuntu:** `sudo ubuntu-drivers install` picks the recommended driver
+     (`ubuntu-drivers devices` lists it first).
+   - **CachyOS:** the installer already set the driver up (its hardware detection, chwd).
+   - **Arch Linux:** `sudo pacman -S --needed nvidia-open nvidia-utils` for the `linux` and
+     `linux-lts` kernels (`nvidia-open-dkms` for others). Cards older than the GTX 16xx/RTX 20xx
+     series need a legacy driver: see the Arch wiki's NVIDIA page.
+
+   Check it: `nvidia-smi` should list the card.
+2. Install the NVIDIA Container Toolkit and register it with Docker.
+
+   **Ubuntu** (from NVIDIA's repository; Ubuntu doesn't package it):
 
    ```bash
    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
@@ -56,6 +103,17 @@ guide inside your WSL Ubuntu shell.
      | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
      | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
    sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+   ```
+
+   **Arch Linux / CachyOS** (in the official repositories):
+
+   ```bash
+   sudo pacman -S --needed nvidia-container-toolkit
+   ```
+
+   **Then, on both:**
+
+   ```bash
    sudo nvidia-ctk runtime configure --runtime=docker
    sudo systemctl restart docker
    ```
@@ -120,6 +178,11 @@ The script then:
 `backend/.env` as the first value of `VTT_CLIENT_TOKENS`.
 
 Running the script again is safe: press Enter at each question to keep the current value.
+
+The script is the same on Ubuntu and Arch/CachyOS. It also records the group that owns the
+Docker socket (`DOCKER_GID` in `.env`). That number differs from machine to machine (e.g. 996 on
+an Ubuntu 24.04 machine, 969 on a fresh Arch install), and the comic dashboard's container list needs
+it, so re-run the script after moving to another machine.
 
 > On the first start, the speech-to-text worker downloads the Whisper `large-v3` model (~3 GB).
 > Follow it with `docker compose logs -f stt-worker` until you see the model load (A7).
@@ -398,6 +461,9 @@ Do this once at a real game session, because it sets the baseline for tuning.
 3. Compute the word error rate (WER). The script strips the `[0:00:42] Name (Character):`
    prefixes so that only the spoken words are compared:
 
+   On Ubuntu, `python3 -m venv` first needs `sudo apt-get install -y python3-venv` (Arch
+   includes it).
+
    ```bash
    python3 -m venv /tmp/wer && /tmp/wer/bin/pip install -q jiwer
    /tmp/wer/bin/python - <<'PY'
@@ -441,6 +507,7 @@ was said, or have each player check their own lines.
 | A rule you expected is missing | It may be legacy only (pre-Remaster books). That's intentional. |
 | Rulings are slow (> 15 s) | Check the Gemini status page. Try a faster model in `VTT_GEMINI_MODEL`. |
 | `/healthz` works locally but not publicly | `docker compose logs cloudflared`. The tunnel token is in `.env`. The public hostname must point to `http://backend:8765`. |
+| Setup script: "Test ruling failed (HTTP 401)" although the public address answers | Another server answers the hostname, e.g. the old one while you set up a new machine. Its tunnel still serves `arbiter.ttrpg-arbiter.org`, and it doesn't know the new client token. Stop the old stack, or move the tunnel token over, then re-run the script. |
 
 ### C2. Foundry module
 
@@ -458,6 +525,7 @@ was said, or have each player check their own lines.
 | Symptom | Cause and fix |
 |---|---|
 | `stt-worker` won't start: *could not select device driver "nvidia"* | The NVIDIA Container Toolkit is missing or Docker wasn't restarted (A3). |
+| `nvidia-smi` says *Driver/library version mismatch*, or the GPU vanished after a system update | The driver was updated but the old kernel module is still loaded (common after `pacman -Syu` on Arch/CachyOS, or a driver update on Ubuntu). Reboot, then `docker compose up -d`. |
 | Out of GPU memory | Set `STT_COMPUTE_TYPE=int8_float16` in `stt-worker/.env` (less VRAM, nearly the same quality), or `STT_MODEL=medium` (noticeably worse Finnish). Then `docker compose up -d stt-worker`. |
 | Transcription falls behind (log says *"Transcription is falling behind"*, or `waited` grows) | First check `docker compose logs stt-worker \| grep "Loading Whisper model"`: if it says `cpu`, the GPU isn't used (A3). Otherwise, in `stt-worker/.env`, try in this order: `STT_BEAM_SIZE=1` (roughly twice as fast, slightly less accurate), then `STT_COMPUTE_TYPE=int8_float16`. Apply with `docker compose up -d stt-worker` and compare the *x real time* figures and the B21 accuracy before and after. |
 | Names or game terms are misspelled | Add them to `STT_PROMPT_TERMS` in `stt-worker/.env` (comma separated: characters, NPCs, places), then `docker compose up -d stt-worker`. |
@@ -490,6 +558,10 @@ cd vtt-automaton
 git pull
 docker compose up -d --build
 ```
+
+**Update the operating system**: `sudo apt-get update && sudo apt-get upgrade` on Ubuntu,
+`sudo pacman -Syu` on Arch/CachyOS. If the kernel or the NVIDIA driver was updated, reboot
+before the next session. The containers come back by themselves (`restart: unless-stopped`).
 
 For a new module version, tag it (`module-v0.1.1`). Molten offers the update on the *Setup*
 screen.

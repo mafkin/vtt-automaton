@@ -27,7 +27,9 @@ uv run python -m app.ingest.aon            # writes VTT_RULES_DB_PATH; --force t
 
 Public address: **https://arbiter.ttrpg-arbiter.org** (Cloudflare tunnel → `http://backend:8765`).
 
-On the server, with Docker installed:
+On the server (Ubuntu 22.04/24.04 or Arch Linux/CachyOS), with Docker and the Compose plugin
+installed ([docs/SETUP.md A2](docs/SETUP.md#a2-install-docker-on-the-server) has the commands for
+both):
 
 ```bash
 git clone https://github.com/mafkin/vtt-automaton.git && cd vtt-automaton
@@ -48,8 +50,9 @@ Discord bot and the GPU speech-to-text worker). For that you need:
   permissions *View Channels*, *Send Messages*, *Attach Files*, *Connect*.
 - Your Discord server ID (Developer Mode → right-click the server → Copy Server ID).
 - An NVIDIA GPU with the driver and the
-  [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/).
-  The Whisper `large-v3` model (~3 GB) downloads on first start.
+  [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/)
+  ([docs/SETUP.md A3](docs/SETUP.md#a3-gpu-support-for-docker-transcription-only): Ubuntu and
+  Arch/CachyOS). The Whisper `large-v3` model (~3 GB) downloads on first start.
 
 ## Discord transcription
 
@@ -139,11 +142,26 @@ To enable it on the server:
 2. Add `comic` to `COMPOSE_PROFILES` in `.env` (e.g. `COMPOSE_PROFILES=transcription,comic`;
    the setup script keeps it) and set `DOCKER_GID` to the group of `/var/run/docker.sock`
    (`stat -c %g /var/run/docker.sock`; the setup script fills it in; the dashboard's container
-   list needs it), then `docker compose up -d --build`.
+   list needs it), then `docker compose up -d --build`. The number differs per machine; if the
+   dashboard says "Error loading containers", it doesn't match: fix it in `.env` and run
+   `docker compose up -d docker-proxy`.
 
 Known issues, measured costs and recommendations from testing: [docs/COMIC-KNOWN-ISSUES.md](docs/COMIC-KNOWN-ISSUES.md).
 
 Tests: `cd comic && uv run pytest`.
+
+## Development tools
+
+Only needed to run the tests on a machine (the server itself needs just Docker):
+
+| Tool | Ubuntu 22.04/24.04 | Arch Linux / CachyOS |
+|---|---|---|
+| [uv](https://docs.astral.sh/uv/) (Python projects) | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `sudo pacman -S uv` |
+| Node.js 22+ (bot, Foundry module) | [NodeSource](https://github.com/nodesource/distributions): `curl -fsSL https://deb.nodesource.com/setup_22.x \| sudo -E bash - && sudo apt-get install -y nodejs` (Ubuntu's own `nodejs`: 18 on 24.04 still runs the tests, with a warning; 12 on 22.04 is too old) | `sudo pacman -S nodejs npm` (or `nodejs-lts-jod` for 22 LTS) |
+| ffmpeg (optional, `scripts/podcast-mix.sh`) | `sudo apt-get install -y ffmpeg` | `sudo pacman -S ffmpeg` |
+
+uv downloads a suitable Python by itself when the system one is too old (Ubuntu 22.04 has 3.10;
+the projects need 3.11+). The test suites pass on Ubuntu 22.04, Ubuntu 24.04 and Arch.
 
 ## Foundry module
 
