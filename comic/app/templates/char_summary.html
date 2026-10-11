@@ -1,0 +1,44 @@
+{% from "ui.html" import icon, chip, picture, CARD %}
+<div id="char-summary" class="{{ CARD }} overflow-hidden" {% if oob %}hx-swap-oob="true"{% endif %}>
+    <div class="relative overflow-hidden bg-slate-800/60 {{ 'aspect-video' if c.sheet else 'aspect-square' }}">
+        {% if hero %}
+        <a href="{{ hero.full }}" data-lightbox="{{ hero.full }}" data-caption="{{ hero.caption }}" class="block h-full" title="Show full size">
+            {{ picture(hero.thumb, hero.caption, lazy=False) }}
+        </a>
+        {% else %}
+        <div class="grid h-full place-items-center text-5xl font-semibold text-slate-600">{{ c.name[:2] | upper }}</div>
+        {% endif %}
+    </div>
+    <div class="space-y-4 p-5">
+        <div>
+            <h1 class="text-xl font-semibold text-white">{{ c.name }}</h1>
+            <p class="text-sm text-slate-500">{{ "Also: " ~ (c.aliases | join(", ")) if c.aliases else "No aliases" }}{% if c.height_cm %} · {{ '%g' | format(c.height_cm) }} cm{% endif %}</p>
+        </div>
+        <div>
+            <div class="mb-2 flex items-center justify-between">
+                <h2 class="text-sm font-medium text-slate-200">Ready for comics</h2>
+                {% if ready %}{{ chip("Ready", "green", dot=True) }}{% else %}{{ chip(done ~ " / " ~ steps | length, "amber") }}{% endif %}
+            </div>
+            <ol class="space-y-1.5 text-sm">
+                {% for s in steps %}
+                <li>
+                    <a href="#{{ s.anchor }}" class="flex items-start gap-2 rounded-md px-1 py-0.5 hover:bg-white/5">
+                        {% if s.done %}
+                        <span class="mt-0.5 text-emerald-400">{{ icon("check", "h-4 w-4") }}</span>
+                        {% else %}
+                        <span class="mt-0.5 {{ 'text-amber-400' if s.required else 'text-slate-600' }}">{{ icon("circle", "h-4 w-4") }}</span>
+                        {% endif %}
+                        <span>
+                            <span class="{{ 'text-slate-200' if s.done else 'text-slate-400' }}">{{ s.label }}</span>{% if not s.required %} <span class="text-xs text-slate-600">optional</span>{% endif %}
+                            {% if not s.done %}<span class="block text-xs text-slate-500">{{ s.hint }}</span>{% endif %}
+                        </span>
+                    </a>
+                </li>
+                {% endfor %}
+            </ol>
+        </div>
+        <div class="border-t border-white/5 pt-3 text-xs text-slate-500">
+            <span class="font-medium text-slate-400">Each page gets:</span> {{ page_refs }}
+        </div>
+    </div>
+</div>

@@ -1,0 +1,111 @@
+{% from "ui.html" import icon, chip, picture, spinner, CARD, BTN_PRIMARY, BTN_SECONDARY %}
+{% set base = "/api/v1/bible/characters/" ~ c.id %}
+<div id="character-media" class="space-y-6">
+    <!-- Reference images: the design as you give it -->
+    <section id="images" class="{{ CARD }} scroll-mt-24" aria-labelledby="images-heading">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-white/5 px-5 py-4">
+            <div>
+                <h2 id="images-heading" class="font-semibold text-white">Reference images <span class="ml-1 text-sm font-normal text-slate-500">{{ c.images | length }}</span></h2>
+                <p class="text-sm text-slate-400">The character alone, clearly: other people in a picture can end up in the comic.</p>
+            </div>
+        </div>
+        <div class="space-y-4 p-5">
+            <form hx-post="{{ base }}/images" hx-encoding="multipart/form-data" hx-target="#character-media" hx-swap="outerHTML">
+                <label data-dropzone class="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-white/10 px-4 py-6 text-center transition hover:border-indigo-400/50 focus-within:border-indigo-400">
+                    <span class="text-slate-400">{{ icon("upload", "h-6 w-6") }}</span>
+                    <span class="text-sm text-slate-200"><span class="font-semibold text-indigo-300">Choose images</span> or drop them here</span>
+                    <span class="text-xs text-slate-500">PNG, JPEG or WebP, up to 10 MB each. Transparent backgrounds become white.</span>
+                    <input type="file" name="files" accept="image/png,image/jpeg,image/webp" multiple class="sr-only">
+                    <span class="htmx-indicator mt-2 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-white/10"><span data-progress class="block h-full w-0 bg-indigo-400 transition-all"></span></span>
+                </label>
+            </form>
+            {% if c.images %}
+            <ul class="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4" role="list">
+                {% for img in c.images %}
+                <li class="group relative overflow-hidden rounded-xl bg-slate-800/60 ring-1 {{ 'ring-emerald-500/50' if loop.index0 < on_pages else 'ring-white/10' }}" {% if loop.index0 < on_pages %}data-on-pages{% endif %}>
+                    <a href="{{ base }}/images/{{ img }}" data-lightbox="{{ base }}/images/{{ img }}" data-caption="{{ c.name }}, reference image {{ loop.index }}" class="relative block aspect-square overflow-hidden" title="Show full size">
+                        {{ picture(base ~ "/images/" ~ img ~ "?w=320", c.name ~ ", reference image " ~ loop.index) }}
+                    </a>
+                    <div class="pointer-events-none absolute left-2 top-2 flex gap-1">
+                        {% if loop.index0 < on_pages %}{{ chip("On pages", "green", solid=True) }}{% endif %}
+                    </div>
+                    <div class="absolute inset-x-0 bottom-0 flex justify-end gap-1 bg-gradient-to-t from-slate-950/90 to-transparent p-2 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
+                        {% if not loop.first %}
+                        <button hx-post="{{ base }}/images/{{ img }}/first" hx-target="#character-media" hx-swap="outerHTML"
+                                class="rounded-md bg-slate-900/90 p-1.5 text-slate-200 ring-1 ring-white/10 hover:text-amber-300" title="Make first: the first images are sent with every page" aria-label="Make reference image {{ loop.index }} the first">{{ icon("star", "h-4 w-4") }}</button>
+                        {% endif %}
+                        <button hx-post="{{ base }}/images/{{ img }}/delete" hx-target="#character-media" hx-swap="outerHTML" hx-confirm="Remove this reference image?"
+                                class="rounded-md bg-slate-900/90 p-1.5 text-slate-200 ring-1 ring-white/10 hover:text-rose-300" title="Remove" aria-label="Remove reference image {{ loop.index }}">{{ icon("trash", "h-4 w-4") }}</button>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            <p class="text-xs text-slate-500">
+                <span class="text-emerald-300">On pages</span>: sent with every comic page
+                {%- if c.sheet %} next to the approved sheet{% endif %}. How many: <a href="/comics" class="underline hover:text-slate-300">Limits</a>.
+                ★ makes an image the first one.
+            </p>
+            {% endif %}
+        </div>
+    </section>
+
+    <!-- Character sheets: drawn in the comic's style; approved ones are the reference on pages -->
+    <section id="sheets" class="{{ CARD }} scroll-mt-24" aria-labelledby="sheets-heading">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-white/5 px-5 py-4">
+            <div>
+                <h2 id="sheets-heading" class="font-semibold text-white">Character sheets</h2>
+                <p class="text-sm text-slate-400">Drawn in the comic's style from the reference images. Approve the one that matches them.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button hx-post="{{ base }}/sheets" hx-target="#character-media" hx-swap="outerHTML" hx-disabled-elt="#sheets button" hx-indicator="#sheets"
+                        {% if not c.images %}disabled title="Upload reference images first"{% endif %} class="{{ BTN_PRIMARY }}">
+                    <span class="hide-while-busy">{{ icon("brush", "h-4 w-4") }}</span><span class="htmx-indicator">{{ spinner() }}</span> Draw sheet
+                </button>
+                <button hx-post="{{ base }}/details" hx-target="#character-media" hx-swap="outerHTML" hx-disabled-elt="#sheets button" hx-indicator="#sheets"
+                        {% if not c.sheet %}disabled title="Approve a character sheet first"{% else %}title="Close-ups of the helm, emblems and weapon, matching the approved sheet"{% endif %} class="{{ BTN_SECONDARY }}">
+                    <span class="hide-while-busy">{{ icon("sparkles", "h-4 w-4") }}</span><span class="htmx-indicator">{{ spinner() }}</span> Draw detail sheet
+                </button>
+            </div>
+        </div>
+        <div class="p-5">
+            <p class="htmx-indicator mb-4 items-center gap-2 rounded-lg bg-indigo-500/10 px-3 py-2 text-sm text-indigo-200">{{ spinner() }} Drawing… this takes about 30 seconds.</p>
+            {% if c.sheets %}
+            <ul class="grid gap-4 sm:grid-cols-2" role="list">
+                {% for sh in (c.sheets | select("in", [c.sheet, c.detail]) | list) + (c.sheets | reverse | reject("in", [c.sheet, c.detail]) | list) %}
+                {% set kind = "Details" if sh.startswith("detail_") else "Full body" %}
+                {% set approved = sh in (c.sheet, c.detail) %}
+                <li class="overflow-hidden rounded-xl bg-slate-800/60 ring-1 {{ 'ring-emerald-500/60' if approved else 'ring-white/10' }}">
+                    <a href="{{ base }}/sheets/{{ sh }}" data-lightbox="{{ base }}/sheets/{{ sh }}" data-caption="{{ c.name }}: {{ kind | lower }} sheet {{ sh }}" class="relative block aspect-video overflow-hidden" title="Show full size">
+                        {{ picture(base ~ "/sheets/" ~ sh ~ "?w=640", c.name ~ ", " ~ (kind | lower) ~ " sheet") }}
+                    </a>
+                    <div class="flex items-center justify-between gap-2 px-3 py-2.5">
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            {{ chip(kind, "indigo") }}
+                            {% if approved %}{{ chip("Approved · on pages", "green", dot=True) }}{% endif %}
+                        </div>
+                        <div class="flex gap-1">
+                            {% if not approved %}
+                            <button hx-post="{{ base }}/sheets/{{ sh }}/approve" hx-target="#character-media" hx-swap="outerHTML"
+                                    class="rounded-md px-2.5 py-1 text-xs font-semibold text-emerald-300 ring-1 ring-inset ring-emerald-500/30 hover:bg-emerald-500/10">Approve</button>
+                            {% endif %}
+                            <button hx-post="{{ base }}/sheets/{{ sh }}/delete" hx-target="#character-media" hx-swap="outerHTML" hx-confirm="Delete this sheet?"
+                                    class="rounded-md p-1.5 text-slate-400 hover:bg-rose-500/10 hover:text-rose-300" title="Delete" aria-label="Delete {{ kind | lower }} sheet {{ sh }}">{{ icon("trash", "h-4 w-4") }}</button>
+                        </div>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            <p class="mt-3 text-xs text-slate-500">Check a sheet against the reference images before approving: a sheet can add details the character doesn't have.</p>
+            {% else %}
+            <div class="flex flex-col items-center rounded-xl border border-dashed border-white/10 px-4 py-10 text-center">
+                <span class="text-slate-500">{{ icon("sheet", "h-7 w-7") }}</span>
+                <p class="mt-2 text-sm text-slate-300">No sheets yet</p>
+                <p class="mt-1 max-w-sm text-xs text-slate-500">
+                    {% if c.images %}Draw one: front, three-quarter and side view in the comic's style.{% else %}Upload reference images first, then draw a sheet.{% endif %}
+                </p>
+            </div>
+            {% endif %}
+        </div>
+    </section>
+</div>
+{% if summary_oob %}{% with oob = True %}{% include "char_summary.html" %}{% endwith %}{% endif %}

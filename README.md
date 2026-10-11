@@ -75,10 +75,31 @@ session asks the rules arbiter, and the ruling appears in Foundry.
 
 Tests: `cd discord-bot && npm ci && npm test`, `cd stt-worker && uv run pytest`.
 
+## Dashboard
+
+With the `comic` profile, the server has a dashboard at `http://127.0.0.1:8771` (on the server
+only; reach it from another machine with `ssh -L 8771:127.0.0.1:8771 server`). Three pages:
+
+- **Server:** the stack's services with on/off switches. **Transcription** (Discord bot and
+  GPU speech-to-text) can be switched off between sessions to free the GPU; **Rules arbiter**
+  (backend and Cloudflare tunnel) too, which also switches transcription off since it needs the
+  arbiter. **Comics** (this dashboard) is always on. A switched-off service stays off after a
+  reboot; `docker compose up -d` (e.g. after an update) starts everything again. Switching
+  transcription off during a recording ends the session (after a confirmation) and its
+  transcript is still posted. Recent sessions are listed below.
+- **Comics:** sessions to make comics from, each comic step by step, and the Limits.
+- **Characters:** the cast as cards showing what each character still needs before comics
+  draw them well, a page per character (profile, reference images, character sheets), and
+  **Campaign & style** (setting, tone, art style, page look, style reference).
+
+The dashboard reaches Docker only through `docker-proxy`, which lets it list this stack's
+containers and start or stop exactly `backend`, `cloudflared`, `discord-bot` and `stt-worker`,
+nothing else. It has no login, so it refuses POSTs that another website makes the browser send.
+
 ## Comic generation (experimental)
 
-Turns a finished session's transcript into comic pages, step by step on the dashboard
-(`http://127.0.0.1:8771/dashboard`, on the server only):
+Turns a finished session's transcript into comic pages, step by step on the dashboard's
+**Comics** page (`http://127.0.0.1:8771/comics`):
 
 1. **Start comic** on a finished session. Gemini reads the transcript (it copes with
    speech-recognition errors and missing speaker names), writes down what happened in the game
@@ -95,25 +116,28 @@ Turns a finished session's transcript into comic pages, step by step on the dash
 Pages and the comic's state are in `data/comic/comics/<id>/`. Comics don't use the local GPU,
 so they can be made while a session is recording.
 
-**Comic bible.** The Comic Bible card holds what carries over from one comic to the next
-(`data/comic/bible.json`): the setting and tone, the art style and things to avoid, the
-language of the speech balloons, and the characters, with names and aliases as they appear in
-transcripts, a short appearance text and reference images. Reference images should show only
-the character; **Draft description from images** lets Gemini write the appearance text and
-the character's **must-haves** (details the page drawer is told never to change).
+**Comic bible.** The **Characters** page holds what carries over from one comic to the next
+(`data/comic/bible.json`): on **Campaign & style**, the setting and tone, the art style and
+things to avoid, and the language of the speech balloons; on each character's page, names and
+aliases as they appear in transcripts, the height, a short appearance text and reference
+images. Reference images should show only the character (drop them on the upload area); **Draft
+from images** lets Gemini write the appearance text and the character's **must-haves**
+(details the page drawer is told never to change). Each page has a checklist of what's still
+missing; a character is *Ready* with a reference image, a height and a description.
 
 **Consistency.** Three things keep characters and pages looking the same:
-- **Character sheets:** **Draw character sheet** draws the character in the comic's own style
-  (front, three-quarter and side view, plain background) from the reference images. Approve
-  one and every page uses it as the character's reference. Pages also get the character's
-  first uploaded image ("on pages"; **⇤ first** picks it; how many: Limits card), the design
-  as you gave it, since a drawn sheet can drift from it.
+- **Character sheets:** **Draw sheet** draws the character in the comic's own style (front,
+  three-quarter and side view, plain background) from the reference images. Approve one and
+  every page uses it as the character's reference. Pages also get the character's first
+  uploaded image ("On pages"; ★ makes an image the first; how many: Limits on the Comics
+  page), the design as you gave it, since a drawn sheet can drift from it.
 - **Who is where:** each panel tells the drawer which characters are in it and which
   reference images are theirs; anyone else is an unnamed extra who must not look like them.
 - **Page look:** a fixed description of lettering, balloons, borders and page colour, added to
   every page.
 - **Style reference:** **Use as style reference** under a drawn page you like sends that page
-  with every new page as the style to match (Comic Bible card: shown, and removable).
+  with every new page as the style to match (Characters → Campaign & style: shown, and
+  removable).
 - **Exact specs:** each character's must-haves (exact about shape, colour and position) and a
   **never** list ("a tabard", "a cross on the helm") are given to the page drawer, and win over
   the panel descriptions.
@@ -122,7 +146,7 @@ the character's **must-haves** (details the page drawer is told never to change)
 - **Continuity:** each page is drawn with the page before it, so looks and rendering carry over.
 - **Look check:** the same call that reads the lettering back also checks each character
   against their must-haves and never list; a clear miss is redrawn like a lettering error
-  (Limits card: on by default).
+  (Limits: on by default).
 - **Speaker tags:** the transcript preview shows the session's `/link` characters with ✓ when
   the bible knows them, ✗ when it doesn't (add the name or an alias).
 
@@ -130,7 +154,7 @@ Each drawing records what it was made with; when a comic has been drawn more tha
 **Compare drawing rounds** shows the rounds side by side, labelled with the references used.
 
 **Limits.** Drawing is what can run away, so a comic's page images and their lettering checks
-are charged to its token budget (Limits card, default 80,000 per comic; a page is about 5,500,
+are charged to its token budget (Limits, default 80,000 per comic; a page is about 5,500,
 so a 10-page comic with a few redraws fits).
 Drawing stops with "Budget reached" before a page that would go over it. Reading the transcript
 and writing the script are single calls per step; their tokens are shown but not budgeted (a
@@ -141,9 +165,9 @@ To enable it on the server:
 1. `cp comic/.env.example comic/.env` and set `GEMINI_API_KEY`.
 2. Add `comic` to `COMPOSE_PROFILES` in `.env` (e.g. `COMPOSE_PROFILES=transcription,comic`;
    the setup script keeps it) and set `DOCKER_GID` to the group of `/var/run/docker.sock`
-   (`stat -c %g /var/run/docker.sock`; the setup script fills it in; the dashboard's container
-   list needs it), then `docker compose up -d --build`. The number differs per machine; if the
-   dashboard says "Error loading containers", it doesn't match: fix it in `.env` and run
+   (`stat -c %g /var/run/docker.sock`; the setup script fills it in; the Server page needs
+   it), then `docker compose up -d --build`. The number differs per machine; if the Server page
+   says it "can't reach Docker through docker-proxy", it doesn't match: fix it in `.env` and run
    `docker compose up -d docker-proxy`.
 
 Known issues, measured costs and recommendations from testing: [docs/COMIC-KNOWN-ISSUES.md](docs/COMIC-KNOWN-ISSUES.md).

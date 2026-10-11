@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ title }}{% endblock %} · VTT Automaton</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        .htmx-indicator { display: none; }
+        .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline-flex; }
+        .htmx-request .hide-while-busy, .htmx-request.hide-while-busy { display: none; }
+        dialog::backdrop { background: rgb(2 6 23 / 0.85); backdrop-filter: blur(2px); }
+        [data-dropzone].dragging { border-color: rgb(129 140 248); background: rgb(99 102 241 / 0.08); }
+        @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+    </style>
+</head>
+<body class="min-h-full bg-slate-950 text-slate-300 antialiased">
+    {% from "ui.html" import icon %}
+    <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:m-2 focus:rounded focus:bg-indigo-500 focus:px-3 focus:py-2 focus:text-white">Skip to content</a>
+    <header class="sticky top-0 z-30 border-b border-white/10 bg-slate-950/80 backdrop-blur">
+        <nav class="mx-auto flex max-w-6xl items-center gap-1 px-4 py-3 sm:gap-2" aria-label="Main">
+            <a href="/dashboard" class="mr-3 flex items-center gap-2 font-semibold text-white sm:mr-6">
+                <span class="grid h-8 w-8 place-items-center rounded-lg bg-indigo-500/20 text-indigo-300">{{ icon("d20") }}</span>
+                <span class="hidden sm:inline">VTT Automaton</span>
+            </a>
+            {% for href, label, key in [("/dashboard", "Server", "server"), ("/comics", "Comics", "comics"), ("/characters", "Characters", "characters")] %}
+            <a href="{{ href }}" {% if page == key %}aria-current="page"{% endif %}
+               class="rounded-lg px-3 py-2 text-sm font-medium transition {{ 'bg-white/10 text-white' if page == key else 'text-slate-400 hover:bg-white/5 hover:text-white' }}">{{ label }}</a>
+            {% endfor %}
+        </nav>
+    </header>
+
+    <main id="main" class="mx-auto max-w-6xl px-4 py-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Notifications from the server arrive as an HX-Trigger "toast" event -->
+    <div id="toasts" class="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2" aria-live="polite" aria-atomic="false"></div>
+
+    <!-- Full-size image viewer for any [data-lightbox] link -->
+    <dialog id="lightbox" class="max-h-[92vh] max-w-[94vw] rounded-xl bg-transparent p-0 text-slate-200">
+        <form method="dialog" class="flex flex-col items-end gap-2">
+            <button class="rounded-lg bg-white/10 px-3 py-1 text-sm hover:bg-white/20" aria-label="Close">Close ✕</button>
+            <img id="lightbox-img" src="" alt="" class="max-h-[82vh] max-w-[92vw] rounded-lg object-contain shadow-2xl">
+            <p id="lightbox-caption" class="self-start text-sm text-slate-400"></p>
+        </form>
+    </dialog>
+
+    <script>
+    (() => {
+        const tones = {
+            success: "border-emerald-500/40 bg-emerald-950/90 text-emerald-100",
+            error: "border-rose-500/40 bg-rose-950/90 text-rose-100",
+            info: "border-indigo-500/40 bg-slate-900/95 text-slate-100",
+        };
+        function toast(message, level = "info") {
+            const el = document.createElement("div");
+            el.setAttribute("role", level === "error" ? "alert" : "status");
+            el.className = "pointer-events-auto rounded-xl border px-4 py-3 text-sm shadow-xl transition duration-300 " + (tones[level] || tones.info);
+            el.textContent = message;
+            document.getElementById("toasts").appendChild(el);
+            setTimeout(() => { el.style.opacity = "0"; setTimeout(() => el.remove(), 300); }, level === "error" ? 8000 : 4000);
+        }
+        window.toast = toast;
+        document.body.addEventListener("toast", (e) => toast(e.detail.message, e.detail.level));
+        document.body.addEventListener("htmx:responseError", (e) =>
+            toast(`Request failed (${e.detail.xhr.status}). Check the comic-api logs.`, "error"));
+        document.body.addEventListener("htmx:sendError", () => toast("The dashboard can't be reached.", "error"));
+
+        // Lightbox
+        document.addEventListener("click", (e) => {
+            const link = e.target.closest("[data-lightbox]");
+            if (!link) return;
+            e.preventDefault();
+            document.getElementById("lightbox-img").src = link.dataset.lightbox;
+            document.getElementById("lightbox-img").alt = link.dataset.caption || "";
+            document.getElementById("lightbox-caption").textContent = link.dataset.caption || "";
+            document.getElementById("lightbox").showModal();
+        });
+        document.getElementById("lightbox").addEventListener("click", (e) => {
+            if (e.target.id === "lightbox") e.target.close(); // click outside the image
+        });
+
+        // Drag-and-drop uploads: drop files on [data-dropzone], or pick them; both submit at once
+        document.addEventListener("dragover", (e) => {
+            const zone = e.target.closest("[data-dropzone]");
+            if (zone) { e.preventDefault(); zone.classList.add("dragging"); }
+        });
+        document.addEventListener("dragleave", (e) => e.target.closest("[data-dropzone]")?.classList.remove("dragging"));
+        document.addEventListener("drop", (e) => {
+            const zone = e.target.closest("[data-dropzone]");
+            if (!zone) return;
+            e.preventDefault();
+            zone.classList.remove("dragging");
+            const input = zone.querySelector("input[type=file]");
+            input.files = e.dataTransfer.files;
+            zone.closest("form").requestSubmit();
+        });
+        document.addEventListener("change", (e) => {
+            if (e.target.matches("[data-dropzone] input[type=file]") && e.target.files.length) e.target.closest("form").requestSubmit();
+        });
+        document.body.addEventListener("htmx:xhr:progress", (e) => {
+            const bar = e.target.querySelector?.("[data-progress]");
+            if (bar && e.detail.lengthComputable) bar.style.width = `${Math.round((e.detail.loaded / e.detail.total) * 100)}%`;
+        });
+
+        // Unsaved changes in [data-dirty-form]: a badge, and a warning before leaving the page
+        let dirty = false;
+        document.addEventListener("input", (e) => {
+            const form = e.target.closest("[data-dirty-form]");
+            if (!form) return;
+            dirty = true;
+            form.querySelector("[data-dirty-badge]")?.classList.remove("hidden");
+        });
+        document.body.addEventListener("htmx:afterRequest", (e) => {
+            if (e.detail.successful && e.detail.elt.closest?.("[data-dirty-form]") && e.detail.requestConfig.verb === "post"
+                && e.detail.elt.matches("form")) dirty = false;
+        });
+        window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+        {% if notice %}document.addEventListener("DOMContentLoaded", () => toast({{ notice | tojson }}, "success"));{% endif %}
+    })();
+    </script>
+</body>
+</html>

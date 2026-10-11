@@ -1,8 +1,7 @@
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app import api, comics
+from app import comics
 from app.api import app
 from app.comics import Balloon, Limits, Moment, ScriptPage, ScriptPanel
 
@@ -49,11 +48,33 @@ def scripted(status="script") -> comics.Comic:
     return c
 
 
-def test_dashboard_has_the_cards(client):
-    html = client.get("/dashboard").text
-    for fragment in ("/api/v1/comics", "/api/v1/bible", "/api/v1/limits"):
-        assert fragment in html
-    assert "/api/v1/dashboard/mode" not in html  # no comic mode any more
+def test_pages_have_the_navigation_and_their_cards(client):
+    server = client.get("/dashboard").text
+    assert "/api/v1/services" in server and "/api/v1/dashboard/sessions" in server
+    for href in ("/dashboard", "/comics", "/characters"):
+        assert f'href="{href}"' in server
+    assert 'aria-current="page"' in server
+    page = client.get("/comics").text
+    assert "/api/v1/comics" in page and "/api/v1/limits" in page
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == "/dashboard"
+
+
+def test_a_notice_from_a_redirect_is_shown_escaped(client):
+    html = client.get("/characters", params={"notice": "Deleted <b>X</b>."}).text
+    assert '"Deleted \\u003cb\\u003eX\\u003c/b\\u003e."' in html and "<b>X</b>" not in html
+
+
+def test_cross_site_posts_are_refused(client):
+    form = {"token_budget_per_comic": "3000", "max_auto_redraws_per_page": "0"}
+    r = client.post("/api/v1/limits", data=form, headers={"sec-fetch-site": "cross-site"})
+    assert r.status_code == 403
+    r = client.post("/api/v1/limits", data=form, headers={"origin": "https://evil.example"})
+    assert r.status_code == 403
+    assert comics.load_limits() == Limits()  # nothing changed
+    ok = {"sec-fetch-site": "same-origin", "origin": "http://testserver"}
+    assert client.post("/api/v1/limits", data=form, headers=ok).status_code == 200
+    assert client.get("/dashboard", headers={"sec-fetch-site": "cross-site"}).status_code == 200
 
 
 def test_comics_card_offers_finished_transcripts(client):
@@ -184,36 +205,6 @@ def test_dashboard_sessions_are_a_read_only_overview(client):
     html = client.get("/api/v1/dashboard/sessions").text
     assert "Session &lt;b&gt;12&lt;/b&gt;" in html and "<b>12</b>" not in html
     assert "hx-post" not in html and "Live" in html
-
-
-def test_containers_show_only_this_stack(client, monkeypatch):
-    def container(name, project, state):
-        labels = {"com.docker.compose.project": project} if project else {}
-        return {"Names": [f"/{name}"], "State": state, "Labels": labels}
-
-    seen = {}
-
-    def proxy(request: httpx.Request) -> httpx.Response:
-        seen["query"] = dict(request.url.params)
-        return httpx.Response(
-            200,
-            json=[
-                container("vtt-stt-worker", "vtt-automaton", "running"),
-                container("vtt-automaton-redis-1", "vtt-automaton", "exited"),
-                container("ifc-checker-app-1", "ifc-checker", "running"),
-                container("some-standalone", None, "running"),
-            ],
-        )
-
-    real = httpx.AsyncClient
-    monkeypatch.setattr(
-        api.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(proxy), **kw)
-    )
-    html = client.get("/api/v1/dashboard/containers").text
-    assert "vtt-stt-worker" in html and "vtt-automaton-redis-1" in html
-    assert "ifc-checker" not in html and "some-standalone" not in html
-    # Stopped containers are listed too.
-    assert seen["query"] == {"all": "true"}
 
 
 def test_compare_grid_shows_rounds_side_by_side(client):
