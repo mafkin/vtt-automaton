@@ -24,13 +24,15 @@ jobs:
             echo "::endgroup::"
           done
       - name: Comic services
-        # Comics are drawn by Gemini: no local renderer, and the Docker socket proxy only lets
-        # the dashboard list containers (read-only).
+        # Comics are drawn by Gemini: no local renderer. The Docker socket proxy lets the
+        # dashboard list containers and start/stop only the four switchable ones.
         run: |
           COMPOSE_PROFILES=transcription,comic docker compose config > resolved.yaml
           # (Not "! grep": a negated command never fails a "set -e" script.)
           if grep -q "comfyui" resolved.yaml; then echo "ComfyUI is still in compose"; exit 1; fi
-          if grep -q "SP_ALLOW_POST" resolved.yaml; then echo "docker-proxy allows POST"; exit 1; fi
+          # POST only to start/stop the four switchable containers (Server page), nothing else.
+          grep -qF 'SP_ALLOW_POST: ^/containers/vtt-automaton-(backend|cloudflared|discord-bot|stt-worker)-1/(start|stop)$' resolved.yaml
+          if grep -qE "SP_ALLOW_(PUT|DELETE|PATCH|HEAD|CONNECT)" resolved.yaml; then echo "docker-proxy allows more methods"; exit 1; fi
           grep -qF 'SP_ALLOW_GET: ^/containers/json$' resolved.yaml
           # The dashboard lists containers of this compose project only.
           grep -q "^name: vtt-automaton$" resolved.yaml

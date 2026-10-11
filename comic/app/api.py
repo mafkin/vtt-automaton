@@ -3,16 +3,15 @@ import sqlite3
 from collections.abc import AsyncIterator
 from html import escape
 from typing import Annotated
+from urllib.parse import quote, urlsplit
 
-import httpx
 from arq import create_pool
 from arq.connections import RedisSettings
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, HTMLResponse, Response
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, Response
 
-from app import bible, comics
+from app import bible, comics, views
 from app.bible import BibleError
 from app.config import settings
 from app.llm import describe_character, draw_detail_sheet, draw_sheet
@@ -24,6 +23,7 @@ from app.sessions import (
     recent_sessions,
     transcript,
 )
+from app.templating import templates
 
 
 @contextlib.asynccontextmanager
@@ -35,46 +35,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="VTT Comic API", lifespan=lifespan)
-templates = Jinja2Templates(directory="app/templates")
-
-COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
+app.include_router(views.router)
 
 # Transcript lines shown when picking a session.
 PREVIEW_LINES = 10
 
 
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    return templates.TemplateResponse(request, "dashboard.html")
-
-
-@app.get("/api/v1/dashboard/containers", response_class=HTMLResponse)
-async def get_containers() -> str:
-    try:
-        async with httpx.AsyncClient() as client:
-            # all=true: stopped containers are shown too.
-            r = await client.get(
-                f"{settings.docker_proxy_url}/containers/json",
-                params={"all": "true"},
-                timeout=10.0,
-            )
-            r.raise_for_status()
-            containers = r.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        return f"<p class='text-red-500'>Error loading containers: {escape(str(exc))}</p>"
-    items = []
-    for c in containers:
-        # The proxy sees every container on the host; show only this compose project.
-        if (c.get("Labels") or {}).get(COMPOSE_PROJECT_LABEL) != settings.compose_project:
-            continue
-        name = escape(c["Names"][0].lstrip("/"))
-        state = escape(c["State"])
-        color = "text-green-400" if c["State"] == "running" else "text-red-400"
-        items.append(
-            "<li class='flex justify-between border-b border-slate-700 pb-2'>"
-            f"<span>{name}</span><span class='{color}'>{state}</span></li>"
-        )
-    return "<ul class='space-y-2'>" + "".join(items) + "</ul>"
+@app.middleware("http")
+async def same_site_posts_only(request: Request, call_next):
+    """The dashboard has no login (it listens on 127.0.0.1 only), so refuse POSTs that another
+    website makes the browser send: they could switch services off or spend Gemini tokens."""
+    if request.method == "POST":
+        fetch_site = request.headers.get("sec-fetch-site")
+        origin = request.headers.get("origin")
+        if fetch_site == "cross-site" or (origin and urlsplit(origin).netloc != request.url.netloc):
+            return PlainTextResponse("Cross-site request refused", status.HTTP_403_FORBIDDEN)
+    return await call_next(request)
 
 
 @app.get("/api/v1/dashboard/sessions", response_class=HTMLResponse)
@@ -83,19 +59,25 @@ async def get_sessions() -> str:
         sessions = recent_sessions(5)
     except sqlite3.Error as exc:
         return f"<p class='text-red-500'>Error loading sessions: {escape(str(exc))}</p>"
+    if not sessions:
+        return "<p class='p-4 text-sm text-slate-500'>No sessions yet. Start one in Discord.</p>"
     items = []
     for s in sessions:
         state = (
-            "<span class='text-amber-400'>Live</span>"
+            "<span class='inline-flex items-center gap-1.5 rounded-full bg-rose-500/10 px-2 py-0.5"
+            " text-xs font-medium text-rose-300 ring-1 ring-inset ring-rose-500/30'>"
+            "<span class='h-1.5 w-1.5 animate-pulse rounded-full bg-current'></span>Live</span>"
             if s.live
-            else "<span class='text-slate-400'>Ended</span>"
+            else "<span class='text-xs text-slate-500'>Ended</span>"
         )
         items.append(
-            "<li class='bg-slate-700 p-4 rounded flex items-center justify-between'>"
-            f"<div><div class='font-bold text-white'>{escape(s.label or 'Unnamed Session')}</div>"
-            f"<div class='text-sm text-slate-400'>ID: {escape(s.id)}</div></div>{state}</li>"
+            "<li class='flex items-center justify-between gap-3 rounded-xl px-3 py-2.5"
+            " hover:bg-white/5'>"
+            f"<div class='min-w-0'><div class='truncate font-medium text-slate-100'>"
+            f"{escape(s.label or 'Unnamed session')}</div>"
+            f"<div class='truncate text-xs text-slate-500'>{escape(s.id)}</div></div>{state}</li>"
         )
-    return "<ul class='space-y-4'>" + "".join(items) + "</ul>"
+    return "<ul class='divide-y divide-white/5'>" + "".join(items) + "</ul>"
 
 
 @app.get("/api/v1/dashboard/transcript", response_class=HTMLResponse)
@@ -305,22 +287,11 @@ async def save_limits(
     return templates.TemplateResponse(request, "limits.html", context)
 
 
-# --- comic bible -----------------------------------------------------------------------------
+# --- comic bible (the Characters pages) ------------------------------------------------------
 
 
-def _bible_card(request: Request, message: str = "", error: bool = False) -> HTMLResponse:
-    context = {
-        "bible": bible.load(),
-        "own_images": comics.load_limits().page_reference_images,
-        "message": message,
-        "error": error,
-    }
-    return templates.TemplateResponse(request, "bible.html", context)
-
-
-@app.get("/api/v1/bible", response_class=HTMLResponse)
-async def get_bible(request: Request):
-    return _bible_card(request)
+def _media(request: Request, character_id: str, message: str = "", level: str = "success"):
+    return views.character_fragment(request, character_id, "char_media.html", message, level)
 
 
 @app.post("/api/v1/bible/campaign", response_class=HTMLResponse)
@@ -339,15 +310,15 @@ async def save_campaign(
     b.style.positive, b.style.negative = style_positive.strip(), style_negative.strip()
     b.style.page_look = style_page_look.strip()
     bible.save(b)
-    return _bible_card(request, "Saved.")
+    return views.campaign_fragment(request, "Campaign and style saved.")
 
 
-@app.post("/api/v1/bible/characters", response_class=HTMLResponse)
-async def add_character(request: Request, name: str = Form("")):
+@app.post("/api/v1/bible/characters")
+async def add_character(name: str = Form("")):
     if not name.strip():
-        return _bible_card(request, "Name is required.", error=True)
-    bible.add_character(name)
-    return _bible_card(request, f"Added {name.strip()}.")
+        return views.toast_only("Name is required.")
+    c = bible.add_character(name)
+    return views.redirect(f"/characters/{c.id}?notice={quote(f'Added {c.name}.')}")
 
 
 @contextlib.contextmanager
@@ -369,14 +340,14 @@ async def update_character(
     traits: str | None = Form(None),
     never: str | None = Form(None),
     height: str | None = Form(None),
-    # Sent by the bible form next to "height": FastAPI turns an empty field into "not sent", so
-    # this tells "cleared" apart from a client that doesn't send heights at all.
+    # Sent by the profile form next to "height": FastAPI turns an empty field into "not sent",
+    # so this tells "cleared" apart from a client that doesn't send heights at all.
     height_field: str | None = Form(None),
 ):
     try:
         height_cm = parse_height(height or "") if height_field else "keep"
     except ValueError as exc:
-        return _bible_card(request, str(exc), error=True)
+        return views.toast_only(str(exc))
     with _known_character():
         bible.update_character(
             character_id,
@@ -387,14 +358,15 @@ async def update_character(
             never.splitlines() if never is not None else None,
             height_cm,
         )
-    return _bible_card(request, "Saved.")
+    return views.character_fragment(request, character_id, "char_profile.html", "Profile saved.")
 
 
-@app.post("/api/v1/bible/characters/{character_id}/delete", response_class=HTMLResponse)
-async def delete_character(request: Request, character_id: str):
+@app.post("/api/v1/bible/characters/{character_id}/delete")
+async def delete_character(character_id: str):
     with _known_character():
+        name = bible.load().character(character_id).name
         bible.delete_character(character_id)
-    return _bible_card(request, "Character deleted.")
+    return views.redirect(f"/characters?notice={quote(f'Deleted {name}.')}")
 
 
 @app.post("/api/v1/bible/characters/{character_id}/images", response_class=HTMLResponse)
@@ -409,16 +381,25 @@ async def upload_images(request: Request, character_id: str, files: list[UploadF
             try:
                 await run_in_threadpool(bible.add_image, character_id, data)
             except BibleError as exc:
-                return _bible_card(request, f"{f.filename}: {exc}", error=True)
+                done = f" ({stored} uploaded before it)" if stored else ""
+                return _media(request, character_id, f"{f.filename}: {exc}{done}", "error")
             stored += 1
-    return _bible_card(request, f"Uploaded {stored} image(s).")
+    return _media(request, character_id, f"Uploaded {stored} image{'s' if stored != 1 else ''}.")
+
+
+def _image_response(path, w: int | None):
+    """The stored PNG, or a cached JPEG thumbnail (?w=) for the dashboard's grids."""
+    if w:
+        data = bible.thumbnail(path, w)
+        return Response(data, media_type="image/jpeg", headers={"Cache-Control": "max-age=300"})
+    return FileResponse(path, media_type="image/png")
 
 
 @app.get("/api/v1/bible/characters/{character_id}/images/{name}")
-async def get_image(character_id: str, name: str):
+async def get_image(character_id: str, name: str, w: int | None = None):
     with _known_character():
         path = bible.image_path(character_id, name)
-    return FileResponse(path, media_type="image/png")
+    return await run_in_threadpool(_image_response, path, w)
 
 
 @app.post(
@@ -427,7 +408,7 @@ async def get_image(character_id: str, name: str):
 async def move_image_first(request: Request, character_id: str, name: str):
     with _known_character():
         bible.move_image_first(character_id, name)
-    return _bible_card(request, "Image moved first.")
+    return _media(request, character_id, "Image moved first: it now goes with every page.")
 
 
 @app.post(
@@ -436,7 +417,7 @@ async def move_image_first(request: Request, character_id: str, name: str):
 async def delete_image(request: Request, character_id: str, name: str):
     with _known_character():
         bible.delete_image(character_id, name)
-    return _bible_card(request, "Image removed.")
+    return _media(request, character_id, "Image removed.")
 
 
 @app.post("/api/v1/bible/characters/{character_id}/describe", response_class=HTMLResponse)
@@ -469,7 +450,7 @@ async def draft_appearance(
     except Exception as exc:  # Gemini errors vary; show them instead of a 500
         return fragment(appearance, current, f"Gemini failed: {exc}", error=True)
     bible.charge(tokens)
-    note = "Draft from the images. Edit it, then press Save."
+    note = "Draft from the images. Edit it, then press Save profile to keep it."
     return fragment(draft.appearance, draft.traits, note)
 
 
@@ -481,14 +462,14 @@ async def draw_character_sheet(request: Request, character_id: str):
         character = b.character(character_id)
         images = [bible.image_path(character_id, n).read_bytes() for n in character.images]
     if not images:
-        return _bible_card(request, f"{character.name}: Upload reference images first.", True)
+        return _media(request, character_id, "Upload reference images first.", "error")
     try:
         png, tokens = await run_in_threadpool(draw_sheet, character, images, b)
     except Exception as exc:  # Gemini errors vary; show them instead of a 500
-        return _bible_card(request, f"{character.name}: Gemini failed: {exc}", error=True)
+        return _media(request, character_id, f"Gemini failed: {exc}", "error")
     bible.charge(tokens)
-    name = bible.add_sheet(character_id, png)
-    return _bible_card(request, f"{character.name}: drew {name}. Approve it to use it on pages.")
+    bible.add_sheet(character_id, png)
+    return _media(request, character_id, "New sheet drawn. Approve it if it matches the images.")
 
 
 @app.post("/api/v1/bible/characters/{character_id}/details", response_class=HTMLResponse)
@@ -499,22 +480,22 @@ async def draw_character_details(request: Request, character_id: str):
         character = b.character(character_id)
         images = [bible.image_path(character_id, n).read_bytes() for n in character.images]
     if not character.sheet:
-        return _bible_card(request, f"{character.name}: Approve a character sheet first.", True)
+        return _media(request, character_id, "Approve a character sheet first.", "error")
     sheet = bible.sheet_path(character_id, character.sheet).read_bytes()
     try:
         png, tokens = await run_in_threadpool(draw_detail_sheet, character, sheet, images, b)
     except Exception as exc:  # Gemini errors vary; show them instead of a 500
-        return _bible_card(request, f"{character.name}: Gemini failed: {exc}", error=True)
+        return _media(request, character_id, f"Gemini failed: {exc}", "error")
     bible.charge(tokens)
-    name = bible.add_sheet(character_id, png, kind="detail")
-    return _bible_card(request, f"{character.name}: drew {name}. Approve it to use it on pages.")
+    bible.add_sheet(character_id, png, kind="detail")
+    return _media(request, character_id, "New detail sheet drawn. Approve it if it matches.")
 
 
 @app.get("/api/v1/bible/characters/{character_id}/sheets/{name}")
-async def get_sheet(character_id: str, name: str):
+async def get_sheet(character_id: str, name: str, w: int | None = None):
     with _known_character():
         path = bible.sheet_path(character_id, name)
-    return FileResponse(path, media_type="image/png")
+    return await run_in_threadpool(_image_response, path, w)
 
 
 @app.post(
@@ -523,7 +504,7 @@ async def get_sheet(character_id: str, name: str):
 async def approve_sheet(request: Request, character_id: str, name: str):
     with _known_character():
         bible.approve_sheet(character_id, name)
-    return _bible_card(request, f"{name} is now the reference on pages.")
+    return _media(request, character_id, "Approved: pages now use this sheet.")
 
 
 @app.post(
@@ -532,7 +513,7 @@ async def approve_sheet(request: Request, character_id: str, name: str):
 async def delete_sheet(request: Request, character_id: str, name: str):
     with _known_character():
         bible.delete_sheet(character_id, name)
-    return _bible_card(request, f"{name} deleted.")
+    return _media(request, character_id, "Sheet deleted.")
 
 
 @app.get("/api/v1/bible/anchor")
@@ -546,7 +527,7 @@ async def get_anchor():
 @app.post("/api/v1/bible/anchor/delete", response_class=HTMLResponse)
 async def delete_anchor(request: Request):
     bible.clear_anchor()
-    return _bible_card(request, "Style reference removed.")
+    return views.campaign_fragment(request, "Style reference removed.")
 
 
 @app.post("/api/v1/comics/{comic_id}/pages/{name}/anchor", response_class=HTMLResponse)

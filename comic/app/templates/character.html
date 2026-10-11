@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "ui.html" import icon, CARD, BTN_DANGER %}
+{% block content %}
+<a href="/characters" class="mb-4 inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-white">{{ icon("back", "h-4 w-4") }} All characters</a>
+
+<div class="grid gap-6 lg:grid-cols-[300px_1fr]">
+    <aside class="lg:sticky lg:top-20 lg:self-start">
+        {% include "char_summary.html" %}
+    </aside>
+
+    <div class="min-w-0 space-y-6">
+        {% include "char_profile.html" %}
+        {% include "char_media.html" %}
+
+        <section class="{{ CARD }} flex flex-wrap items-center justify-between gap-4 p-5" aria-labelledby="danger-heading">
+            <div>
+                <h2 id="danger-heading" class="font-semibold text-white">Delete {{ c.name }}</h2>
+                <p class="text-sm text-slate-400">Removes the character with all their images and sheets. Comics already drawn stay as they are.</p>
+            </div>
+            <button hx-post="/api/v1/bible/characters/{{ c.id }}/delete" hx-confirm="Delete {{ c.name }} with all images and sheets? This can't be undone."
+                    class="{{ BTN_DANGER }}">{{ icon("trash", "h-4 w-4") }} Delete character</button>
+        </section>
+    </div>
+</div>
+{% endblock %}

@@ -1,13 +1,24 @@
-<label class="block">
-    <span class="text-sm text-slate-400">Appearance (given to the script writer and the page drawer with the images; keep it short)</span>
-    <textarea name="appearance" rows="2" class="w-full bg-slate-800 text-white p-2 rounded">{{ appearance if appearance is defined else c.appearance }}</textarea>
-</label>
-<label class="block">
-    <span class="text-sm text-slate-400">Must-haves (one per line, exact about shape, colour and position, e.g. "blue heater shield with three gold towers")</span>
-    <textarea name="traits" rows="3" class="w-full bg-slate-800 text-white p-2 rounded">{{ (traits if traits is defined else c.traits) | join('\n') }}</textarea>
-</label>
-<label class="block">
-    <span class="text-sm text-slate-400">Never (one per line; what the page drawer must not give this character, e.g. "a tabard", "a cross on the helm")</span>
-    <textarea name="never" rows="2" class="w-full bg-slate-800 text-white p-2 rounded">{{ c.never | join('\n') }}</textarea>
-</label>
-{% if note %}<p class="text-sm {{ 'text-red-400' if error else 'text-amber-400' }}">{{ note }}</p>{% endif %}
+{% from "ui.html" import INPUT, LABEL, HINT %}
+{% if note %}
+<p class="rounded-lg px-3 py-2 text-sm ring-1 ring-inset {{ 'bg-rose-500/10 text-rose-200 ring-rose-500/30' if error else 'bg-indigo-500/10 text-indigo-200 ring-indigo-500/30' }}" role="status">{{ note }}</p>
+{% endif %}
+<div>
+    <label for="appearance-text-{{ c.id }}" class="{{ LABEL }}">Appearance</label>
+    <textarea id="appearance-text-{{ c.id }}" name="appearance" rows="3" class="{{ INPUT }}"
+              placeholder="species, build, hair, face, clothing, colours">{{ appearance if appearance is defined else c.appearance }}</textarea>
+    <p class="{{ HINT }}">Short phrases. Describe build and proportions ("short, stubby, round body"); the height has its own field.</p>
+</div>
+<div class="grid gap-5 md:grid-cols-2">
+    <div>
+        <label for="traits-{{ c.id }}" class="{{ LABEL }}">Must-haves</label>
+        <textarea id="traits-{{ c.id }}" name="traits" rows="5" class="{{ INPUT }}"
+                  placeholder="flail: exactly one spiked iron ball on one chain">{{ (traits if traits is defined else c.traits) | join('\n') }}</textarea>
+        <p class="{{ HINT }}">One per line, exact about shape, colour, material, number and position.</p>
+    </div>
+    <div>
+        <label for="never-{{ c.id }}" class="{{ LABEL }}">Never</label>
+        <textarea id="never-{{ c.id }}" name="never" rows="5" class="{{ INPUT }}"
+                  placeholder="a tabard&#10;a cross on the helm">{{ c.never | join('\n') }}</textarea>
+        <p class="{{ HINT }}">One per line: what the page drawer must not give this character.</p>
+    </div>
+</div>

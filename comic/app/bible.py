@@ -4,6 +4,7 @@ Stored on the data volume as data/comic/bible.json, with character reference ima
 data/comic/characters/<id>/. Edited from the dashboard; each comic job reads it at the start.
 """
 
+import functools
 import io
 import json
 import re
@@ -21,6 +22,10 @@ from app.files import write_atomic
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_SIDE = 1024
+# Thumbnail widths the dashboard asks for (other requests snap to the next one up).
+THUMB_WIDTHS = (160, 320, 640, 1280)
+# Character ids that would clash with dashboard addresses (/characters/campaign).
+RESERVED_IDS = {"campaign"}
 _IMAGE_NAME = re.compile(r"[0-9a-f]{16}\.png")
 _SHEET_NAME = re.compile(r"(sheet|detail)_\d+\.png")
 
@@ -127,7 +132,7 @@ def slugify(name: str) -> str:
 def add_character(name: str) -> Character:
     bible = load()
     base = slugify(name)
-    taken = {c.id for c in bible.characters}
+    taken = {c.id for c in bible.characters} | RESERVED_IDS
     character_id, n = base, 2
     while character_id in taken:
         character_id, n = f"{base}-{n}", n + 1
@@ -269,6 +274,22 @@ def delete_sheet(character_id: str, name: str) -> None:
         character.detail = None
     save(bible)
     path.unlink(missing_ok=True)
+
+
+def thumbnail(path: Path, width: int) -> bytes:
+    """A JPEG no wider than `width` (snapped to THUMB_WIDTHS), for the dashboard's grids:
+    sheets are drawn at 2K. Cached per file version."""
+    width = next((w for w in THUMB_WIDTHS if w >= width), THUMB_WIDTHS[-1])
+    return _thumbnail(str(path), path.stat().st_mtime_ns, width)
+
+
+@functools.lru_cache(maxsize=256)
+def _thumbnail(path: str, mtime_ns: int, width: int) -> bytes:
+    image = Image.open(path).convert("RGB")
+    image.thumbnail((width, width * 4))
+    buf = io.BytesIO()
+    image.save(buf, "JPEG", quality=85)
+    return buf.getvalue()
 
 
 ORIGINAL_LABEL = "original design reference: copy its design, not its drawing style"

@@ -1,0 +1,66 @@
+{% from "ui.html" import icon, chip, spinner, CARD %}
+{# Refreshes every 5 s; a switch posts and gets this fragment back. #}
+<div id="services" hx-get="/api/v1/services" hx-trigger="every 5s [!document.querySelector('#services .htmx-request')]" hx-swap="outerHTML">
+    {% if error %}
+    <div class="{{ CARD }} flex items-start gap-3 p-5 text-sm text-rose-200" role="alert">
+        {{ icon("warning", "h-5 w-5 shrink-0 text-rose-400") }}
+        <div>
+            <p class="font-medium">{{ error }}</p>
+            <p class="mt-1 text-rose-200/70">Check that docker-proxy is running and that <code>DOCKER_GID</code> in <code>.env</code> matches <code>stat -c %g /var/run/docker.sock</code>; then <code>docker compose up -d docker-proxy</code>.</p>
+        </div>
+    </div>
+    {% else %}
+    <div class="grid gap-4 md:grid-cols-3">
+        {% for gs in groups %}
+        {% set g = gs.group %}
+        {% set tone = {"running": "green", "partial": "amber", "stopped": "slate", "missing": "slate"}[gs.summary] %}
+        {% set label = {"running": "Running", "partial": "Partly running", "stopped": "Off", "missing": "Not set up"}[gs.summary] %}
+        <article class="{{ CARD }} flex flex-col p-5" aria-labelledby="group-{{ g.id }}">
+            <div class="flex items-start justify-between gap-3">
+                <div>
+                    <h3 id="group-{{ g.id }}" class="font-semibold text-white">{{ g.name }}</h3>
+                    <div class="mt-1 flex items-center gap-2">
+                        <span class="hide-while-busy">{{ chip(label, tone, dot=True) }}</span>
+                        <span class="htmx-indicator text-xs text-slate-400" title="Stopping the Discord bot can take up to 20 s: it ends a live recording first.">Switching…</span>
+                    </div>
+                </div>
+                {% if g.switchable and gs.installed %}
+                {% set confirm = "" %}
+                {% if gs.on and g.id == "transcription" and live %}{% set confirm = "A session is being recorded. Switching transcription off ends it (the transcript is still posted). Continue?" %}{% endif %}
+                {% if gs.on and dependants.get(g.id) %}{% set confirm = "This also switches off " ~ dependants[g.id] ~ ". Continue?" %}{% endif %}
+                <button type="button" role="switch" aria-checked="{{ 'true' if gs.on else 'false' }}" aria-labelledby="group-{{ g.id }}"
+                        hx-post="/api/v1/services/{{ g.id }}/{{ 'off' if gs.on else 'on' }}" hx-target="#services" hx-swap="outerHTML"
+                        hx-disabled-elt="this" hx-indicator="closest article" {% if confirm %}hx-confirm="{{ confirm }}"{% endif %}
+                        class="group relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-60 {{ 'bg-emerald-500' if gs.on else 'bg-slate-700' }}">
+                    <span class="sr-only">{{ 'Switch off' if gs.on else 'Switch on' }}</span>
+                    <span class="hide-while-busy inline-block h-5 w-5 rounded-full bg-white shadow transition {{ 'translate-x-6' if gs.on else 'translate-x-1' }}"></span>
+                    <span class="htmx-indicator absolute inset-0 items-center justify-center text-white">{{ spinner() }}</span>
+                </button>
+                {% elif not g.switchable %}
+                <span class="text-xs text-slate-500">Always on</span>
+                {% endif %}
+            </div>
+            <p class="mt-3 text-sm text-slate-400">{{ g.description }}</p>
+            {% if gs.installed %}
+            <ul class="mt-4 space-y-1.5 border-t border-white/5 pt-3 text-sm">
+                {% for c in gs.containers %}
+                <li class="flex items-center justify-between gap-2">
+                    <span class="flex items-center gap-2 text-slate-300">
+                        <span class="h-2 w-2 rounded-full {{ 'bg-emerald-400' if c.state == 'running' else 'bg-amber-400' if c.state == 'restarting' else 'bg-slate-600' }}"></span>{{ c.service }}
+                    </span>
+                    <span class="truncate text-xs text-slate-500" title="{{ c.status }}">{{ c.status }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="mt-4 border-t border-white/5 pt-3 text-xs text-slate-500">
+                Its containers don't exist yet: add <code class="text-slate-400">{{ g.profile }}</code> to
+                <code class="text-slate-400">COMPOSE_PROFILES</code> in <code class="text-slate-400">.env</code> and run
+                <code class="text-slate-400">docker compose up -d</code>.
+            </p>
+            {% endif %}
+        </article>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>

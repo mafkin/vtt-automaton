@@ -1,0 +1,16 @@
+{% from "ui.html" import icon, BTN_PRIMARY %}
+<div class="mb-6 flex flex-wrap items-end justify-between gap-4">
+    <div>
+        <h1 class="text-2xl font-semibold text-white">Characters</h1>
+        <p class="mt-1 text-sm text-slate-400">How each character looks in comics, and the campaign's art style.</p>
+    </div>
+    {% if tab == "cast" %}
+    <button type="button" onclick="document.getElementById('add-character').showModal()" class="{{ BTN_PRIMARY }}">{{ icon("plus", "h-4 w-4") }} Add character</button>
+    {% endif %}
+</div>
+<nav class="mb-6 flex gap-1 border-b border-white/10" aria-label="Characters sections">
+    {% for href, label, key in [("/characters", "Cast", "cast"), ("/characters/campaign", "Campaign & style", "campaign")] %}
+    <a href="{{ href }}" {% if tab == key %}aria-current="page"{% endif %}
+       class="-mb-px border-b-2 px-3 py-2 text-sm font-medium transition {{ 'border-indigo-400 text-white' if tab == key else 'border-transparent text-slate-400 hover:text-white' }}">{{ label }}</a>
+    {% endfor %}
+</nav>

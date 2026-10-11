@@ -1,20 +1,29 @@
-<form id="limits" hx-post="/api/v1/limits" hx-swap="outerHTML" class="flex flex-wrap items-end gap-4">
-    <label class="block">
-        <span class="text-sm text-slate-400">Token budget per comic for drawing (page images + lettering checks; a page is ~5,500)</span>
-        <input type="number" min="0" step="1000" name="token_budget_per_comic" value="{{ limits.token_budget_per_comic }}" class="block bg-slate-700 text-white p-2 rounded">
+{% from "ui.html" import INPUT, LABEL, HINT, BTN_PRIMARY %}
+<form id="limits" hx-post="/api/v1/limits" hx-swap="outerHTML" class="space-y-4">
+    <div>
+        <label for="token_budget_per_comic" class="{{ LABEL }}">Drawing budget per comic</label>
+        <input type="number" min="0" step="1000" id="token_budget_per_comic" name="token_budget_per_comic" value="{{ limits.token_budget_per_comic }}" class="{{ INPUT }}">
+        <p class="{{ HINT }}">Tokens for page images and their lettering checks; a page is about 5,500.</p>
+    </div>
+    <div>
+        <label for="max_auto_redraws_per_page" class="{{ LABEL }}">Automatic redraws per page</label>
+        <input type="number" min="0" max="3" id="max_auto_redraws_per_page" name="max_auto_redraws_per_page" value="{{ limits.max_auto_redraws_per_page }}" class="{{ INPUT }}">
+        <p class="{{ HINT }}">0-3, when the lettering or a look is wrong.</p>
+    </div>
+    <div>
+        <label for="page_reference_images" class="{{ LABEL }}">Own images per character on pages</label>
+        <input type="number" min="0" max="3" id="page_reference_images" name="page_reference_images" value="{{ limits.page_reference_images }}" class="{{ INPUT }}">
+        <p class="{{ HINT }}">0-3, sent besides approved sheets; each a few hundred tokens per page.</p>
+    </div>
+    <label class="flex items-start gap-3">
+        <input type="checkbox" name="look_check" value="on" {% if limits.look_check %}checked{% endif %} class="mt-1 h-4 w-4 rounded border-white/20 bg-slate-950 text-indigo-500 focus:ring-indigo-400">
+        <span>
+            <span class="block text-sm font-medium text-slate-200">Look check</span>
+            <span class="{{ HINT }} block">Checks characters against their must-haves and never lists; redraws on a clear miss.</span>
+        </span>
     </label>
-    <label class="block">
-        <span class="text-sm text-slate-400">Automatic redraws when lettering is wrong (0-3)</span>
-        <input type="number" min="0" max="3" name="max_auto_redraws_per_page" value="{{ limits.max_auto_redraws_per_page }}" class="block bg-slate-700 text-white p-2 rounded">
-    </label>
-    <label class="block">
-        <span class="text-sm text-slate-400">Own images per character sent with each page, besides approved sheets (0-3; each ~a few hundred tokens)</span>
-        <input type="number" min="0" max="3" name="page_reference_images" value="{{ limits.page_reference_images }}" class="block bg-slate-700 text-white p-2 rounded">
-    </label>
-    <label class="flex items-center gap-2">
-        <input type="checkbox" name="look_check" value="on" {% if limits.look_check %}checked{% endif %}>
-        <span class="text-sm text-slate-400">Look check (characters vs. their must-haves/never; redraw on a clear miss)</span>
-    </label>
-    <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded">Save limits</button>
-    {% if message %}<span class="{{ 'text-green-400' if message == 'Saved.' else 'text-red-400' }} font-bold">{{ message }}</span>{% endif %}
+    <div class="flex items-center gap-3">
+        <button type="submit" class="{{ BTN_PRIMARY }}">Save limits</button>
+        {% if message %}<span class="text-sm font-medium {{ 'text-emerald-300' if message == 'Saved.' else 'text-rose-300' }}" role="status">{{ message }}</span>{% endif %}
+    </div>
 </form>

@@ -181,7 +181,7 @@ Running the script again is safe: press Enter at each question to keep the curre
 
 The script is the same on Ubuntu and Arch/CachyOS. It also records the group that owns the
 Docker socket (`DOCKER_GID` in `.env`). That number differs from machine to machine (e.g. 996 on
-an Ubuntu 24.04 machine, 969 on a fresh Arch install), and the comic dashboard's container list needs
+an Ubuntu 24.04 machine, 969 on a fresh Arch install), and the dashboard's Server page (service switches) needs
 it, so re-run the script after moving to another machine.
 
 > On the first start, the speech-to-text worker downloads the Whisper `large-v3` model (~3 GB).

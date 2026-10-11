@@ -1,7 +1,8 @@
 # Home-server deployment.
 # Profiles (COMPOSE_PROFILES in .env; scripts/setup-server.sh keeps it up to date):
 #   transcription: the Discord bot and the GPU speech-to-text worker
-#   comic:         comics from session transcripts, drawn by Gemini (dashboard on :8771)
+#   comic:         comics from session transcripts, drawn by Gemini, and the dashboard on :8771
+#                  (Server page: switch transcription and the arbiter on and off)
 
 # Fixed project name, whatever the checkout folder is called: container names and the
 # dashboard's container list (comic/app/config.py: compose_project) depend on it.
@@ -60,6 +61,8 @@ services:
   discord-bot:
     profiles: [transcription]
     build: ./discord-bot
+    # On stop the bot ends a live recording session and posts its transcript first.
+    stop_grace_period: 20s
     env_file: ./discord-bot/.env
     environment:
       BACKEND_URL: http://backend:8765
@@ -85,10 +88,13 @@ services:
 
   docker-proxy:
     profiles: [comic]
-    # Read-only socket proxy: the dashboard lists this stack's containers, nothing else.
+    # Socket proxy for the dashboard: it lists this stack's containers, and may start or stop
+    # only the four switchable ones (Server page). Nothing else: no restart, create, exec or
+    # delete, no other container. The regex sees the path only, so ?t= timeouts still work.
     image: wollomatic/socket-proxy:1
     environment:
       - SP_ALLOW_GET=^/containers/json$
+      - SP_ALLOW_POST=^/containers/vtt-automaton-(backend|cloudflared|discord-bot|stt-worker)-1/(start|stop)$
       # Listen on the compose network and accept only the dashboard (the defaults,
       # 127.0.0.1, are unreachable from other containers).
       - SP_LISTENIP=0.0.0.0

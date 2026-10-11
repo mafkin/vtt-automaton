@@ -1,0 +1,68 @@
+{% from "ui.html" import icon, CARD, INPUT, LABEL, HINT, BTN_PRIMARY, BTN_DANGER %}
+<div id="campaign" class="grid gap-6 lg:grid-cols-[1fr_320px]">
+    <form hx-post="/api/v1/bible/campaign" hx-target="#campaign" hx-swap="outerHTML" data-dirty-form class="{{ CARD }}">
+        <div class="flex items-center justify-between gap-4 border-b border-white/5 px-5 py-4">
+            <div>
+                <h2 class="font-semibold text-white">Campaign and art style</h2>
+                <p class="text-sm text-slate-400">Shared by every comic: the story context for scripts, the style for every page.</p>
+            </div>
+            <span data-dirty-badge class="hidden rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-300 ring-1 ring-inset ring-amber-500/30">Unsaved changes</span>
+        </div>
+        <div class="space-y-6 p-5">
+            <fieldset class="space-y-4">
+                <legend class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Story</legend>
+                <div>
+                    <label for="setting" class="{{ LABEL }}">Setting</label>
+                    <textarea id="setting" name="setting" rows="3" class="{{ INPUT }}" placeholder="Where and when; what places look like">{{ bible.setting }}</textarea>
+                </div>
+                <div>
+                    <label for="tone" class="{{ LABEL }}">Tone</label>
+                    <textarea id="tone" name="tone" rows="2" class="{{ INPUT }}" placeholder="Humour, what to leave out">{{ bible.tone }}</textarea>
+                </div>
+                <div class="max-w-xs">
+                    <label for="bubble_language" class="{{ LABEL }}">Speech bubble language</label>
+                    <input id="bubble_language" name="bubble_language" value="{{ bible.bubble_language }}" class="{{ INPUT }}">
+                </div>
+            </fieldset>
+            <fieldset class="space-y-4">
+                <legend class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Art style</legend>
+                <div>
+                    <label for="style_positive" class="{{ LABEL }}">Art style</label>
+                    <textarea id="style_positive" name="style_positive" rows="2" class="{{ INPUT }}">{{ bible.style.positive }}</textarea>
+                    <p class="{{ HINT }}">Added to every page and character sheet.</p>
+                </div>
+                <div>
+                    <label for="style_negative" class="{{ LABEL }}">Avoid</label>
+                    <textarea id="style_negative" name="style_negative" rows="2" class="{{ INPUT }}">{{ bible.style.negative }}</textarea>
+                </div>
+                <div>
+                    <label for="style_page_look" class="{{ LABEL }}">Page look</label>
+                    <textarea id="style_page_look" name="style_page_look" rows="2" class="{{ INPUT }}">{{ bible.style.page_look }}</textarea>
+                    <p class="{{ HINT }}">Lettering, balloons, borders and page colour: the same on every page.</p>
+                </div>
+            </fieldset>
+        </div>
+        <div class="flex items-center justify-between gap-2 border-t border-white/5 px-5 py-4">
+            <span class="text-xs text-slate-500">Gemini tokens spent on characters (sheets, drafts): {{ bible.tokens_used }}</span>
+            <button type="submit" class="{{ BTN_PRIMARY }}">Save</button>
+        </div>
+    </form>
+
+    <aside class="{{ CARD }} self-start p-5" aria-labelledby="anchor-heading">
+        <h2 id="anchor-heading" class="font-semibold text-white">Style reference</h2>
+        {% if bible.style.anchor %}
+        <a href="/api/v1/bible/anchor" data-lightbox="/api/v1/bible/anchor" data-caption="Style reference page" class="mt-3 block overflow-hidden rounded-xl ring-1 ring-white/10">
+            <img src="/api/v1/bible/anchor" alt="Style reference page" class="w-full">
+        </a>
+        <p class="mt-3 text-sm text-slate-400">Sent with every page: new pages match its drawing style, colours, lettering and borders. Only use a page where everyone is drawn right.</p>
+        <button hx-post="/api/v1/bible/anchor/delete" hx-target="#campaign" hx-swap="outerHTML" hx-confirm="Remove the style reference?"
+                class="{{ BTN_DANGER }} mt-4">{{ icon("trash", "h-4 w-4") }} Remove</button>
+        {% else %}
+        <div class="mt-3 flex flex-col items-center rounded-xl border border-dashed border-white/10 px-4 py-8 text-center">
+            <span class="text-slate-500">{{ icon("photo", "h-7 w-7") }}</span>
+            <p class="mt-2 text-sm text-slate-300">None set</p>
+            <p class="mt-1 text-xs text-slate-500">Under a drawn page you like, on <a href="/comics" class="underline hover:text-slate-300">Comics</a>, choose <b>Use as style reference</b>.</p>
+        </div>
+        {% endif %}
+    </aside>
+</div>

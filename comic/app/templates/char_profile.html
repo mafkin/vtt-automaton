@@ -1,0 +1,47 @@
+{% from "ui.html" import icon, spinner, CARD, INPUT, LABEL, HINT, BTN_PRIMARY, BTN_SECONDARY %}
+<section id="profile" class="{{ CARD }} scroll-mt-24" aria-labelledby="profile-heading">
+    <form hx-post="/api/v1/bible/characters/{{ c.id }}" hx-target="#profile" hx-swap="outerHTML" data-dirty-form>
+        <div class="flex items-center justify-between gap-4 border-b border-white/5 px-5 py-4">
+            <div>
+                <h2 id="profile-heading" class="font-semibold text-white">Profile</h2>
+                <p class="text-sm text-slate-400">Given to the script writer and the page drawer with the images.</p>
+            </div>
+            <span data-dirty-badge class="hidden rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-300 ring-1 ring-inset ring-amber-500/30">Unsaved changes</span>
+        </div>
+        <div class="space-y-5 p-5">
+            <div class="grid gap-4 sm:grid-cols-[1fr_1fr_140px]">
+                <div>
+                    <label for="name-{{ c.id }}" class="{{ LABEL }}">Name</label>
+                    <input id="name-{{ c.id }}" name="name" value="{{ c.name }}" required class="{{ INPUT }}">
+                </div>
+                <div>
+                    <label for="aliases-{{ c.id }}" class="{{ LABEL }}">Aliases</label>
+                    <input id="aliases-{{ c.id }}" name="aliases" value="{{ c.aliases | join(', ') }}" placeholder="Nicknames, other spellings" class="{{ INPUT }}">
+                    <p class="{{ HINT }}">Comma separated: other names in transcripts.</p>
+                </div>
+                <div>
+                    <label for="height-{{ c.id }}" class="{{ LABEL }}">Height</label>
+                    <input type="hidden" name="height_field" value="1">
+                    <div class="relative">
+                        <input id="height-{{ c.id }}" name="height" value="{{ '%g' | format(c.height_cm) if c.height_cm else '' }}" inputmode="decimal" placeholder="e.g. 60" class="{{ INPUT }} pr-10">
+                        <span class="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-slate-500">cm</span>
+                    </div>
+                    <p class="{{ HINT }}">Or 1.8 m. Pages compare sizes.</p>
+                </div>
+            </div>
+            <div id="appearance-{{ c.id }}" class="space-y-5">
+                {% include "appearance.html" %}
+            </div>
+        </div>
+        <div class="flex flex-wrap items-center justify-end gap-2 border-t border-white/5 px-5 py-4">
+            <button type="button" hx-post="/api/v1/bible/characters/{{ c.id }}/describe" hx-include="#appearance-{{ c.id }}"
+                    hx-target="#appearance-{{ c.id }}" hx-disabled-elt="this" class="{{ BTN_SECONDARY }} mr-auto"
+                    title="Gemini reads the reference images and drafts the appearance and must-haves. Nothing is saved until you press Save.">
+                <span class="hide-while-busy">{{ icon("sparkles", "h-4 w-4") }}</span><span class="htmx-indicator">{{ spinner() }}</span>
+                Draft from images
+            </button>
+            <button type="submit" class="{{ BTN_PRIMARY }}">Save profile</button>
+        </div>
+    </form>
+</section>
+{% if summary_oob %}{% with oob = True %}{% include "char_summary.html" %}{% endwith %}{% endif %}

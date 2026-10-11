@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% from "ui.html" import icon, CARD %}
+{% block content %}
+<div class="mb-8 flex flex-wrap items-end justify-between gap-4">
+    <div>
+        <h1 class="text-2xl font-semibold text-white">Comics</h1>
+        <p class="mt-1 text-sm text-slate-400">From a finished session's transcript to drawn pages, one step at a time.</p>
+    </div>
+    <a href="/characters" class="text-sm text-indigo-300 hover:text-indigo-200">Characters and style →</a>
+</div>
+
+<div class="grid gap-6 lg:grid-cols-[1fr_320px]">
+    <section class="{{ CARD }} p-5" aria-labelledby="comics-heading">
+        <div class="mb-4 flex items-center justify-between">
+            <h2 id="comics-heading" class="text-lg font-semibold text-white">Sessions and comics</h2>
+            <button hx-get="/api/v1/comics" hx-target="#comics" hx-swap="outerHTML"
+                    class="inline-flex items-center gap-1 text-sm text-slate-400 hover:text-white">{{ icon("refresh", "h-4 w-4") }} Refresh</button>
+        </div>
+        <!-- Loaded once so a refresh doesn't reset what you're editing -->
+        <div hx-get="/api/v1/comics" hx-trigger="load" hx-swap="outerHTML" id="comics">
+            <p class="text-sm text-slate-500">Loading comics…</p>
+        </div>
+    </section>
+
+    <aside class="space-y-6">
+        <section class="{{ CARD }} p-5" aria-labelledby="limits-heading">
+            <h2 id="limits-heading" class="mb-1 text-lg font-semibold text-white">Limits</h2>
+            <p class="mb-4 text-xs text-slate-500">A failsafe for Gemini spending.</p>
+            <div hx-get="/api/v1/limits" hx-trigger="load" hx-swap="outerHTML">
+                <p class="text-sm text-slate-500">Loading limits…</p>
+            </div>
+        </section>
+    </aside>
+</div>
+{% endblock %}

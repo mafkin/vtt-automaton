@@ -22,7 +22,7 @@ The image model redraws characters in every panel rather than copying them. **Re
 ### Automatic redraws multiply the cost and rarely fix the problem
 With the look check on and one automatic redraw, most pages were drawn twice. The second attempt often repeated the same mistake, because the same inputs produced the same result. A page then costs about 15,000 tokens instead of 6,000–8,000.
 - Since `fed148d`, a redraw is told what the check found, which should help. It wasn't tested before testing stopped.
-- **Recommended:** set automatic redraws to 0 (Limits card), or turn the look check off, and redraw bad pages by hand with an instruction.
+- **Recommended:** set automatic redraws to 0 (Limits, on the Comics page), or turn the look check off, and redraw bad pages by hand with an instruction.
 
 ### Contradicting inputs win over the spec
 Since the prompt-consistency change, every page prompt states one order of authority: character
@@ -53,8 +53,8 @@ The drawer corrects a misspelling in the script ("Väistykaa" → "Väistykää"
 Before testing again, these gaps were fixed on the application side:
 - **Your own images reach pages.** Before, with an approved sheet, pages saw only the AI-drawn
   sheet, so a sheet's drift (an extra helm cross, a taller Rintaro) carried into every page.
-  Pages now also get the first uploaded image ("on pages" on the Bible card; **⇤ first** picks
-  which). Without a sheet, pages can get up to three of your images. Limits card: 0-3, default 1.
+  Pages now also get the first uploaded image ("On pages" on the character's page; ★ picks
+  which). Without a sheet, pages can get up to three of your images. Limits: 0-3, default 1.
 - **Labels sit next to their images.** Images used to go first and the text called them
   "reference image 3"; each image now follows its own label, so the model ties names to the
   right picture (sheets and detail sheets too).
@@ -79,7 +79,7 @@ Before testing again, these gaps were fixed on the application side:
 | One page with one automatic redraw | ~15,000 |
 | Character sheet / detail sheet | ~5,000–6,000 each (bible, not budgeted) |
 
-The drawing budget is per comic (Limits card, default 80,000). It covers page images and their checks, and drawing stops before a page that would go over it. The whole test (three pages, four rounds plus sheets) used about 145,000 drawing tokens.
+The drawing budget is per comic (Limits, default 80,000). It covers page images and their checks, and drawing stops before a page that would go over it. The whole test (three pages, four rounds plus sheets) used about 145,000 drawing tokens.
 
 ## Recommendations
 1. Set every character's **height** in the bible (cm). Reference images aren't to scale, so
